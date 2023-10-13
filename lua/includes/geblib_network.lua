@@ -72,6 +72,37 @@ local function UnsignedNumberToBits(uNum)
     return bitsAmount
 end
 
+local function UIntToBits(uInt)
+    if uInt < 0 then error("can't convert unsigned int that is less than 0") end
+    if uInt == 0 then return 1 end
+
+    local bitsAmount = 0
+    while uInt > 0 do
+        bitsAmount = bitsAmount + 1
+        uInt = bit.rshift(uInt, 1)
+    end
+
+    return bitsAmount
+end
+
+local function IntToBits(int)
+    if int < 0 then
+        int = math.abs(int + 1)
+    end
+
+    return math.max(UIntToBits(int), 3)
+end
+
+if CLIENT then
+    for i = -5, 50 do
+        local num = i
+        print("Num test: " .. num)
+        print("New method: " .. UIntToBits(num))
+        print("Old method: " .. UnsignedNumberToBits(num))
+        print()
+    end
+end
+
 --Class
 
 gebLib_net = {}
