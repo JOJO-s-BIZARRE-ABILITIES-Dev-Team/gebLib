@@ -6,6 +6,7 @@ gebLib.Version = "0.0.0"
 gebLib.Build   = "0"
 //
 --------------------------
+--TODO: make this work with varargs
 function gebLib.PrintDebug( string ) -- Equivalent to print(), however prints only if gebLib_developer_debugmode is on 
     if !gebLib.DebugMode() then return end
     string = tostring(string)
