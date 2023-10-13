@@ -13,6 +13,8 @@ if SERVER then
     util.AddNetworkString("gebLib.cl.core.UpdateAngle")
     util.AddNetworkString("gebLib.cl.core.UpdateColor")
     util.AddNetworkString("gebLib.cl.core.UpdateByIndex")
+    util.AddNetworkString("gebTest")
+    util.AddNetworkString("gebTest2")
 end
 
 //////////////////////////////////////
@@ -50,6 +52,12 @@ local TableToJSON   = util.TableToJSON
 //////////////////////////////////////
 
 gebLib_net = {}
+gebLib_net.VarsToIndexes = {
+    ["test_int"] = 0
+}
+gebLib_net.IndexedVars = {
+    "test_int"
+}
 
 --Helper functions
 function gebLib_net.UIntToBits(uInt)
@@ -90,11 +98,12 @@ local WriteBits = gebLib_net.WriteBits
 local ReadBits = gebLib_net.ReadBits
 
 function gebLib_net.WritePlayer(ply)
-    net.WriteUInt(ply:EntIndex(), player.GetCount())
+    net.WriteUInt(ply:EntIndex(), UIntToBits(player.GetCount() - 1))
 end
 
 function gebLib_net.ReadPlayer()
-    return Entity(net.ReadUInt(player.GetCount()))
+    local bits = UIntToBits(player.GetCount() - 1)
+    return Entity(net.ReadUInt(bits))
 end
 
 local WritePlayer = gebLib_net.WritePlayer
@@ -112,7 +121,7 @@ function gebLib_net.WriteEntity(ent)
     local entIndex = ent:EntIndex()
     local bitsAmount = UIntToBits(entIndex)
     WriteBits(bitsAmount)
-    net.WriteUInt(entIndex)
+    net.WriteUInt(entIndex, bitsAmount)
 end
 
 function gebLib_net.ReadEntity()
@@ -131,42 +140,64 @@ local ReadEntity = gebLib_net.ReadEntity
 
 function gebLib_net.WriteEntityAndVar(ent, var)
     WriteEntity(ent)
-    net.WriteString(var)
-end
-
-function gebLib_net.ReadEntityAndVar()
-    return ReadEntity(), net.ReadString()
-end
-
-function gebLib_net.UpdateEntityValue(entity, varName, valueToSet)
-    if CLIENT then return end
-    entity[varName] = valueToSet
-    if isstring(valueToSet) then
-        gebLib_net.UpdateEntityString(entity, varName, valueToSet)
-    elseif isnumber(valueToSet) then
-        gebLib_net.UpdateEntityNumber(entity, varName, valueToSet)
-    elseif isbool(valueToSet) then
-        gebLib_net.UpdateEntityBool(entity, varName, valueToSet)
-    elseif isvector(valueToSet) then
-        gebLib_net.UpdateEntityVector(entity, varName, valueToSet)
-    elseif isangle(valueToSet) then
-        gebLib_net.UpdateEntityAngle(entity, varName, valueToSet)
-    elseif IsColor(valueToSet) then
-        gebLib_net.UpdateEntityColor(entity, varName, valueToSet)
-    elseif istable(valueToSet) then
-        gebLib_net.UpdateEntityTable(entity, varName, valueToSet)
+    net.WriteBool(isnumber(var))
+    if isnumber(var) then
+        net.WriteUInt(var, UIntToBits(#gebLib_net.IndexedVars))
+    else
+        net.WriteString(var)
     end
 end
 
-function gebLib_net.UpdateEntityString(entity, varName, stringToSet)
+function gebLib_net.ReadEntityAndVar()
+    local ent = ReadEntity()
+    local isIndex = net.ReadBool()
+    local var
+
+    if isIndex then
+        var = net.ReadUInt(UIntToBits(#gebLib_net.IndexedVars))
+    else
+        var = net.ReadString()
+    end
+
+    return ent, var
+end
+
+local WriteEntityAndVar = gebLib_net.WriteEntityAndVar
+local ReadEntityAndVar = gebLib_net.ReadEntityAndVar
+
+function gebLib_net.UpdateEntityValue(ent, varName, valueToSet)
+    if CLIENT then return end
+    ent[varName] = valueToSet
+
+    if gebLib_net.VarsToIndexes[varName] then
+        varName = gebLib_net.VarsToIndexes[varName]
+    end
+
+    if isstring(valueToSet) then
+        gebLib_net.UpdateEntityString(ent, varName, valueToSet)
+    elseif isnumber(valueToSet) then
+        gebLib_net.UpdateEntityNumber(ent, varName, valueToSet)
+    elseif isbool(valueToSet) then
+        gebLib_net.UpdateEntityBool(ent, varName, valueToSet)
+    elseif isvector(valueToSet) then
+        gebLib_net.UpdateEntityVector(ent, varName, valueToSet)
+    elseif isangle(valueToSet) then
+        gebLib_net.UpdateEntityAngle(ent, varName, valueToSet)
+    elseif IsColor(valueToSet) then
+        gebLib_net.UpdateEntityColor(ent, varName, valueToSet)
+    elseif istable(valueToSet) then
+        gebLib_net.UpdateEntityTable(ent, varName, valueToSet)
+    end
+end
+
+function gebLib_net.UpdateEntityString(ent, varName, stringToSet)
     net.Start("gebLib.cl.core.UpdateString")
-    net.WriteString(stringToSet) --Has to be first!
-    net.WriteEntity(entity)
-    net.WriteString(varName)
+    net.WriteString(stringToSet)
+    WriteEntityAndVar(ent, varName)
     net.Broadcast()
 end
 
-function gebLib_net.UpdateEntityTable(entity, varName, tableToSet)
+function gebLib_net.UpdateEntityTable(ent, varName, tableToSet)
     local json = TableToJSON(tableToSet)
     local compressedData = Compress(json)
     local bytesAmount = #compressedData
@@ -174,20 +205,18 @@ function gebLib_net.UpdateEntityTable(entity, varName, tableToSet)
     net.Start("gebLib.cl.core.UpdateTable")
     net.WriteUInt(bytesAmount, 16)
     net.WriteData(compressedData, bytesAmount)
-    net.WriteEntity(entity)
-    net.WriteString(varName)
+    WriteEntityAndVar(ent, varName)
     net.Broadcast()
 end
 
-function gebLib_net.UpdateEntityColor(entity, varName, colorToSet)
+function gebLib_net.UpdateEntityColor(ent, varName, colorToSet)
     net.Start("gebLib.cl.core.UpdateColor")
     net.WriteColor(colorToSet, false)
-    net.WriteEntity(entity)
-    net.WriteString(varName)
+    WriteEntityAndVar(ent, varName)
     net.Broadcast()
 end
 
-function gebLib_net.UpdateEntityVector(entity, varName, vectorToSet)
+function gebLib_net.UpdateEntityVector(ent, varName, vectorToSet)
     if gebLib_IsNormalized(vectorToSet) then
         gebLib_net.UpdateEntityNormalVector()
     else
@@ -195,101 +224,104 @@ function gebLib_net.UpdateEntityVector(entity, varName, vectorToSet)
     end
 end
 
-function gebLib_net.UpdateEntityVectorSlow(entity, varName, vectorToSet)
+function gebLib_net.UpdateEntityVectorSlow(ent, varName, vectorToSet)
     net.Start("gebLib.cl.core.UpdateVector")
     net.WriteVector(vectorToSet)
-    net.WriteEntity(entity)
-    net.WriteString(varName)
+    WriteEntityAndVar(ent, varName)
     net.Broadcast()
 end
 
-function gebLib_net.UpdateEntityNormalVector(entity, varName, vectorToSet)
+function gebLib_net.UpdateEntityNormalVector(ent, varName, vectorToSet)
     net.Start("gebLib.cl.core.UpdateVectorNormal")
     net.WriteNormal(vectorToSet)
-    net.WriteEntity(entity)
-    net.WriteString(varName)
+    WriteEntityAndVar(ent, varName)
     net.Broadcast()
 end
 
-function gebLib_net.UpdateEntityAngle(entity, varName, angleToSet)
+function gebLib_net.UpdateEntityAngle(ent, varName, angleToSet)
     net.Start("gebLib.cl.core.UpdateAngle")
     net.WriteAngle(angleToSet)
-    net.WriteEntity(entity)
-    net.WriteString(varName)
+    WriteEntityAndVar(ent, varName)
     net.Broadcast()
 end
 
-function gebLib_net.UpdateEntityBool(entity, varName, boolToSet)
+function gebLib_net.UpdateEntityBool(ent, varName, boolToSet)
     net.Start("gebLib.cl.core.UpdateBool")
     net.WriteBool(boolToSet)
-    net.WriteEntity(entity)
-    net.WriteString(varName)
+    WriteEntityAndVar(ent, varName)
     net.Broadcast()
 end
 
-function gebLib_net.UpdateEntityNumber(entity, varName, numberToSet)
+function gebLib_net.UpdateEntityNumber(ent, varName, numberToSet)
     if numberToSet % 1 != 0 then
-        gebLib_net.UpdateEntityFloat(entity, varName, numberToSet)
+        gebLib_net.UpdateEntityFloat(ent, varName, numberToSet)
     elseif numberToSet > 0 then
-        gebLib_net.UpdateEntityUInt(entity, varName, numberToSet)
+        gebLib_net.UpdateEntityUInt(ent, varName, numberToSet)
     else
-        gebLib_net.UpdateEntityInt(entity, varName, numberToSet)
+        gebLib_net.UpdateEntityInt(ent, varName, numberToSet)
     end
 end
 
-function gebLib_net.UpdateEntityInt(entity, varName, numberToSet, bitsAmount)
+function gebLib_net.UpdateEntityInt(ent, varName, numberToSet, bitsAmount)
     if not bitsAmount then
         bitsAmount = IntToBits(numberToSet)
     end
 
     net.Start("gebLib.cl.core.UpdateInt")
-    net.WriteUInt(bitsAmount, 6)
+    WriteBits(bitsAmount)
     net.WriteInt(numberToSet, bitsAmount)
-    net.WriteEntity(entity)
-    net.WriteString(varName)
+    WriteEntityAndVar(ent, varName)
     net.Broadcast()
 end
 
 --Use with non negative numbers for smaller packets
-function gebLib_net.UpdateEntityUInt(entity, varName, numberToSet, bitsAmount)
+function gebLib_net.UpdateEntityUInt(ent, varName, numberToSet, bitsAmount)
     if not bitsAmount then
         bitsAmount = UIntToBits(numberToSet)
     end
 
     net.Start("gebLib.cl.core.UpdateUInt")
-    net.WriteUInt(bitsAmount, 6)
+    WriteBits(bitsAmount)
     net.WriteUInt(numberToSet, bitsAmount)
-    net.WriteEntity(entity)
-    net.WriteString(varName)
+    WriteEntityAndVar(ent, varName)
+    print(net.BytesWritten())
     net.Broadcast()
 end
 
-function gebLib_net.UpdateEntityFloat(entity, varName, numberToSet)
+function gebLib_net.UpdateEntityFloat(ent, varName, numberToSet)
     net.Start("gebLib.cl.core.UpdateFloat")
-    net.WriteEntity(entity)
-    net.WriteString(varName)
+    WriteEntityAndVar(ent, varName)
     net.WriteFloat(numberToSet)
     net.Broadcast()
 end
 
+local ply = Entity(5)
+if SERVER then
+    ply.test_int = 1
+
+    gebLib_net.UpdateEntityValue(ply, "test_int", 5)
+end
+
+timer.Simple(0, function()
+    print(ply.test_int)
+end)
+
 --Handling for clients
 if CLIENT then
-    local function DebugMessage(len, entity, varName, value)
+    local function DebugMessage(len, ent, varName, value)
         if gebLib.DebugMode() and gebLib.NetworkDebug() then
-            gebLib_PrintDebug(tostring(LocalPlayer()) .. ": network message length: " .. len .. " bits, " .. "entity: " .. tostring(entity) .. ", variable name: " .. varName .. ", variable value: " ..tostring(value))
+            gebLib_PrintDebug(tostring(LocalPlayer()) .. ": network message length: " .. len .. " bits, " .. "ent: " .. tostring(ent) .. ", variable name: " .. varName .. ", variable value: " ..tostring(value))
         end
     end
 
     local function SetEntityValue(value, len)
-        local entity = net.ReadEntity()
-        local varName = net.ReadString()
-        DebugMessage(len, entity, varName, value)
-
-        if !IsValid( entity ) then
-            error("gebLib Networking: Trying to update variable: " .. varName .. " to value: " .. tostring(value) .. " on entity that is nil, entity might not be loaded or does not exist on the client!")
+        local ent, varName = ReadEntityAndVar()
+        DebugMessage(len, ent, varName, value)
+        if not ent:IsValid() then
+            error("gebLib Networking: Trying to update variable: " .. varName .. " to value: " .. tostring(value) .. " on ent that is nil, ent might not be loaded or does not exist on the client!")
         end
 
-        entity[varName] = value
+        ent[varName] = value
     end
 
     net.Receive("gebLib.cl.core.UpdateString", function(len)
@@ -298,13 +330,13 @@ if CLIENT then
     end)
 
     net.Receive("gebLib.cl.core.UpdateInt", function(len)
-        local bitsAmount = net.ReadUInt(6)
+        local bitsAmount = ReadBits()
         local value = net.ReadInt(bitsAmount)
         SetEntityValue(value, len)
     end)
 
     net.Receive("gebLib.cl.core.UpdateUInt", function(len)
-        local bitsAmount = net.ReadUInt(6)
+        local bitsAmount = ReadBits()
         local value = net.ReadUInt(bitsAmount)
         SetEntityValue(value, len)
     end)
