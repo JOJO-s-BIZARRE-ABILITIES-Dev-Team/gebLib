@@ -48,8 +48,10 @@ local TableToJSON   = util.TableToJSON
 -- local netWriteBit       = net.WriteBit  
 -- local netReadBit        = net.ReadBit
 //////////////////////////////////////
---Helper functions
 
+gebLib_net = {}
+
+--Helper functions
 function gebLib_net.UIntToBits(uInt)
     if uInt < 0 then error("can't convert unsigned int that is less than 0") end
     if uInt == 0 then return 1 end
@@ -71,12 +73,9 @@ function gebLib_net.IntToBits(int)
     return max(UIntToBits(int) + 1, 3)
 end
 
+
 local UIntToBits = gebLib_net.UIntToBits
 local IntToBits = gebLib_net.IntToBits
-
---Class
-
-gebLib_net = {}
 
 function gebLib_net.UpdateEntityValue(entity, varName, valueToSet)
     if CLIENT then return end
