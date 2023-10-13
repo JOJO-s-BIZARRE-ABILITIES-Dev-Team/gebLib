@@ -36,16 +36,6 @@ if SERVER then
     util.AddNetworkString("gebLib.cl.utils.ChatAddText")
 end
 --------------------------
-function gebLib_utils.MatchFromTable(table, toMatch)
-	for _, v in ipairs(table) do
-		if stringmatch(toMatch, v) then
-			return true
-		end
-	end
-	 
-	return false
-end
---------------------------
 /////////////////////////
 // PLAYER FUNCTIONS
 /////////////////////////
@@ -225,11 +215,21 @@ function MENT:gebLib_GetBoneHitBox(bone)
     end
 end
 --------------------------
-function gebLib_IsNormalized(vector)
+function gebLib_utils.IsNormalized(vector)
 	return mathFloor( vector:LengthSqr() + 0.5 ) == 1
 end
 --------------------------
-function geblib_TableEquals(tbl1, tbl2)
+function gebLib_utils.MatchFromTable(table, toMatch)
+	for _, v in ipairs(table) do
+		if stringmatch(toMatch, v) then
+			return true
+		end
+	end
+	 
+	return false
+end
+/////////////////////////
+function gebLib_utils.TableEquals(tbl1, tbl2)
 	if tbl1 == tbl2 then
 		return true
 	elseif type(tbl1) == "table" and type(tbl2) == "table" then

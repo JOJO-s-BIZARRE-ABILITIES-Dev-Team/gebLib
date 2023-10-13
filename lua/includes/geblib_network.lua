@@ -15,13 +15,45 @@ if SERVER then
     util.AddNetworkString("gebLib.cl.core.UpdateByIndex")
 end
 
+//////////////////////////////////////
+local mathAbs       = math.abs
+local mathFloor     = math.floor
+local mathLog       = math.log
+local isstring      = isstring
+local isnumber      = isnumber
+local isbool        = isbool
+local istable       = istable
+local isvector      = isvector
+local isangle       = isangle
+local IsColor       = IsColor
+local Compress      = util.Compress
+local Decompress    = util.Decompress
+local JSONToTable   = util.JSONToTable
+local TableToJSON   = util.TableToJSON
+-- local netStart      = net.Start              // i dont think localizing all of this will be even effective
+-- local netWriteString    = net.WriteString
+-- local netReadString     = net.ReadString
+-- local netWriteBool      = net.WriteBool
+-- local netReadBool       = net.ReadBool
+-- local netWriteInt       = net.WriteInt
+-- local netWriteUInt      = net.WriteUInt
+-- local netWriteUInt64    = net.WriteUInt64
+-- local netReadInt        = net.ReadInt
+-- local netReadUInt       = net.ReadUInt
+-- local netReadUInt64     = net.ReadUInt64
+-- local netWriteData      = net.WriteData
+-- local netReadData       = net.ReadData
+-- local netWriteBit       = net.WriteBit  
+-- local netReadBit        = net.ReadBit
+local
+//////////////////////////////////////
 --Helper functions
 local function NumberToBits(num)
     if num < 0 then
-        num = math.abs(num + 1)
+        num = mathAbs(num + 1)
     end
 
-    local bitsAmount = math.floor(math.log(num * 2, 2)) + 1
+    local bitsAmount = mathFloor(mathLog(num * 2, 2)) + 1
 
     if bitsAmount < 3 then
         bitsAmount = 3
@@ -36,7 +68,7 @@ local function UnsignedNumberToBits(uNum)
         uNum = uNum + 1
     end
 
-    local bitsAmount = math.floor(math.log(uNum, 2)) + 1
+    local bitsAmount = mathFloor(mathLog(uNum, 2)) + 1
 
     return bitsAmount
 end
@@ -47,6 +79,8 @@ gebLib_net = {}
 gebLib_net.__index = gebLib_net
 
 function gebLib_net.UpdateEntityValue(entity, varName, valueToSet)
+    if CLIENT then return end
+    entity[varName] = valueToSet
     if isstring(valueToSet) then
         gebLib_net.UpdateEntityString(entity, varName, valueToSet)
     elseif isnumber(valueToSet) then
@@ -73,8 +107,8 @@ function gebLib_net.UpdateEntityString(entity, varName, stringToSet)
 end
 
 function gebLib_net.UpdateEntityTable(entity, varName, tableToSet)
-    local json = util.TableToJSON(tableToSet)
-    local compressedData = util.Compress(json)
+    local json = TableToJSON(tableToSet)
+    local compressedData = Compress(json)
     local bytesAmount = #compressedData
 
     net.Start("gebLib.cl.core.UpdateTable")
@@ -133,17 +167,6 @@ function gebLib_net.UpdateEntityBool(entity, varName, boolToSet)
     net.Broadcast()
 end
 
-function gebLib_net.UpdateEntityByIndex(entity, varName, stringToSet)
-    local varIndex = BA_VarsToIndexes[varName]
-    local valueIndex = BA_StandsToIndexes[stringToSet]
-
-    net.Start("gebLib.cl.core.UpdateByIndex")
-    net.WriteEntity(entity)
-    net.WriteUInt(varIndex, UnsignedNumberToBits(#BA_IndexesToVars)) --Need to get sequential version of the table, so I'll get the table with numerical keys
-    net.WriteUInt(valueIndex, UnsignedNumberToBits(#BA_IndexesToStands)) --Need to get sequential version of the table, so I'll get the table with numerical keys
-    net.Broadcast()    
-end
-
 function gebLib_net.UpdateEntityNumber(entity, varName, numberToSet)
     if numberToSet % 1 != 0 then
         gebLib_net.UpdateEntityFloat(entity, varName, numberToSet)
@@ -192,8 +215,8 @@ end
 --Handling for clients
 if CLIENT then
     local function DebugMessage(len, entity, varName, value)
-        if BA_DebugMode() and gebLib_networkDebug() then
-            BA_PrintDebug(tostring(LocalPlayer()) .. ": network message length: " .. len .. " bits, " .. "entity: " .. tostring(entity) .. ", variable name: " .. varName .. ", variable value: " ..tostring(value))
+        if gebLib.DebugMode() and gebLib.NetworkDebug() then
+            gebLib_PrintDebug(tostring(LocalPlayer()) .. ": network message length: " .. len .. " bits, " .. "entity: " .. tostring(entity) .. ", variable name: " .. varName .. ", variable value: " ..tostring(value))
         end
     end
 
@@ -202,7 +225,7 @@ if CLIENT then
         local varName = net.ReadString()
         DebugMessage(len, entity, varName, value)
 
-        if not entity:IsValid() then
+        if !IsValid( entity ) then
             error("gebLib Networking: Trying to update variable: " .. varName .. " to value: " .. tostring(value) .. " on entity that is nil, entity might not be loaded or does not exist on the client!")
         end
 
@@ -258,7 +281,7 @@ if CLIENT then
 
     net.Receive("gebLib.cl.core.UpdateTable", function(len)
         local bytesAmount = net.ReadUInt(16)
-        local value = util.JSONToTable(util.Decompress(net.ReadData(bytesAmount)))
+        local value = JSONToTable(Decompress(net.ReadData(bytesAmount)))
         SetEntityValue(value, len)
     end)
 end
