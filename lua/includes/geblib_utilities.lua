@@ -9,8 +9,12 @@ local Vector            = Vector
 local Angle             = Angle
 local stringmatch       = string.match
 local TableToJSON       = util.TableToJSON
+local JSONToTable       = util.JSONToTable
 local Compress          = util.Compress
+local Decompress        = util.Decompress
 local netStart          = net.Start
+local netReadData       = net.ReadData
+local netReadUInt       = net.ReadUInt
 local netWriteUInt      = net.WriteUInt
 local netWriteData      = net.WriteData
 local netSend           = net.Send
@@ -20,11 +24,13 @@ local tableInsert       = table.insert
 local tableMerge        = table.Merge
 local IsValid           = IsValid
 local istable           = istable
+local isstring          = isstring
 local IsEntity          = IsEntity
 local mathFloor         = math.floor
 local type              = type
 local pairs             = pairs
 local ipairs            = ipairs
+local unpack            = unpack
 --------------------------
 if SERVER then
     util.AddNetworkString("gebLib.cl.utils.ChatAddText")
@@ -57,6 +63,23 @@ function MPLY:gebLib_ChatAddText( ... )
         netWriteData( data, bytes )
     netSend( self )
 end
+
+net.Receive("gebLib.cl.utils.ChatAddText", function()
+    local bytes = netReadUInt(16)
+    local data = netReadData(bytes)
+
+    local json = Decompress(data)
+    local args = JSONToTable(json)
+
+    for k, v in ipairs( args ) do
+        if isstring(v) then
+            args[ k ] = language.GetPhrase( v )   
+        end
+    end
+
+    chat.AddText( unpack( args ) )
+end)
+//
 --------------------------
 /////////////////////////
 // ENTITY FUNCTIONS
