@@ -16,7 +16,9 @@ if SERVER then
 end
 
 //////////////////////////////////////
-local mathAbs       = math.abs
+local rshift = bit.rshift
+local max = math.max
+local abs       = math.abs
 local mathFloor     = math.floor
 local mathLog       = math.log
 local isstring      = isstring
@@ -47,66 +49,34 @@ local TableToJSON   = util.TableToJSON
 -- local netReadBit        = net.ReadBit
 //////////////////////////////////////
 --Helper functions
-local function NumberToBits(num)
-    if num < 0 then
-        num = mathAbs(num + 1)
-    end
 
-    local bitsAmount = mathFloor(mathLog(num * 2, 2)) + 1
-
-    if bitsAmount < 3 then
-        bitsAmount = 3
-    end
-
-    return bitsAmount
-end
-
---Used only for positive numbers, otherwise it will error
-local function UnsignedNumberToBits(uNum)
-    if uNum % 2 == 0 then
-        uNum = uNum + 1
-    end
-
-    local bitsAmount = mathFloor(mathLog(uNum, 2)) + 1
-
-    return bitsAmount
-end
-
-local function UIntToBits(uInt)
+function gebLib_net.UIntToBits(uInt)
     if uInt < 0 then error("can't convert unsigned int that is less than 0") end
     if uInt == 0 then return 1 end
 
     local bitsAmount = 0
     while uInt > 0 do
         bitsAmount = bitsAmount + 1
-        uInt = bit.rshift(uInt, 1)
+        uInt = rshift(uInt, 1)
     end
 
     return bitsAmount
 end
 
-local function IntToBits(int)
+function gebLib_net.IntToBits(int)
     if int < 0 then
-        int = math.abs(int + 1)
+        int = abs(int + 1)
     end
 
-    return math.max(UIntToBits(int), 3)
+    return max(UIntToBits(int) + 1, 3)
 end
 
-if CLIENT then
-    for i = -5, 50 do
-        local num = i
-        print("Num test: " .. num)
-        print("New method: " .. UIntToBits(num))
-        print("Old method: " .. UnsignedNumberToBits(num))
-        print()
-    end
-end
+local UIntToBits = gebLib_net.UIntToBits
+local IntToBits = gebLib_net.IntToBits
 
 --Class
 
 gebLib_net = {}
-gebLib_net.__index = gebLib_net
 
 function gebLib_net.UpdateEntityValue(entity, varName, valueToSet)
     if CLIENT then return end
@@ -209,7 +179,7 @@ end
 
 function gebLib_net.UpdateEntityInt(entity, varName, numberToSet, bitsAmount)
     if not bitsAmount then
-        bitsAmount = NumberToBits(numberToSet)
+        bitsAmount = IntToBits(numberToSet)
     end
 
     net.Start("gebLib.cl.core.UpdateInt")
@@ -223,7 +193,7 @@ end
 --Used for non negative numbers for higher speed
 function gebLib_net.UpdateEntityUInt(entity, varName, numberToSet, bitsAmount)
     if not bitsAmount then
-        bitsAmount = UnsignedNumberToBits(numberToSet)
+        bitsAmount = UIntToBits(numberToSet)
     end
 
     net.Start("gebLib.cl.core.UpdateUInt")
