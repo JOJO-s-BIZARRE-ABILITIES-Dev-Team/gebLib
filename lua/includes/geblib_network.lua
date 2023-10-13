@@ -73,9 +73,70 @@ function gebLib_net.IntToBits(int)
     return max(UIntToBits(int) + 1, 3)
 end
 
-
 local UIntToBits = gebLib_net.UIntToBits
 local IntToBits = gebLib_net.IntToBits
+
+--Substracting 1 from the amount, so that the range is from 0 - 31 instead of 1 - 32, saving one bit
+function gebLib_net.WriteBits(amount)
+    net.WriteUInt(amount - 1, 5)
+end
+
+--Adding the substracted 1 back, so it correctly represents the bits amount
+function gebLib_net.ReadBits()
+    return net.ReadUInt(5) + 1
+end
+
+local WriteBits = gebLib_net.WriteBits
+local ReadBits = gebLib_net.ReadBits
+
+function gebLib_net.WritePlayer(ply)
+    net.WriteUInt(ply:EntIndex(), player.GetCount())
+end
+
+function gebLib_net.ReadPlayer()
+    return Entity(net.ReadUInt(player.GetCount()))
+end
+
+local WritePlayer = gebLib_net.WritePlayer
+local ReadPlayer = gebLib_net.ReadPlayer
+
+function gebLib_net.WriteEntity(ent)
+    local isPlayer = ent:IsPlayer()
+    net.WriteBool(isPlayer)
+
+    if isPlayer then
+        WritePlayer(ent)
+        return
+    end
+
+    local entIndex = ent:EntIndex()
+    local bitsAmount = UIntToBits(entIndex)
+    WriteBits(bitsAmount)
+    net.WriteUInt(entIndex)
+end
+
+function gebLib_net.ReadEntity()
+    local isPlayer = net.ReadBool()
+
+    if isPlayer then
+        return ReadPlayer()
+    end
+
+    local bits = ReadBits()
+    return Entity(net.ReadUInt(bits))
+end
+
+local WriteEntity = gebLib_net.WriteEntity
+local ReadEntity = gebLib_net.ReadEntity
+
+function gebLib_net.WriteEntityAndVar(ent, var)
+    WriteEntity(ent)
+    net.WriteString(var)
+end
+
+function gebLib_net.ReadEntityAndVar()
+    return ReadEntity(), net.ReadString()
+end
 
 function gebLib_net.UpdateEntityValue(entity, varName, valueToSet)
     if CLIENT then return end
@@ -189,7 +250,7 @@ function gebLib_net.UpdateEntityInt(entity, varName, numberToSet, bitsAmount)
     net.Broadcast()
 end
 
---Used for non negative numbers for higher speed
+--Use with non negative numbers for smaller packets
 function gebLib_net.UpdateEntityUInt(entity, varName, numberToSet, bitsAmount)
     if not bitsAmount then
         bitsAmount = UIntToBits(numberToSet)
