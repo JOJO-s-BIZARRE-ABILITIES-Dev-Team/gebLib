@@ -2,11 +2,11 @@
 --------------------------
 //
 gebLib = {}
-gebLib.Version = "0"
+gebLib.Version = "0.0.0"
 gebLib.Build   = "0"
 //
 --------------------------
-function gebLib.PrintDebug( string ) -- Equivalent to print(), however prints only if debLib_developer_debugmode is on 
+function gebLib.PrintDebug( string ) -- Equivalent to print(), however prints only if gebLib_developer_debugmode is on 
     if !gebLib.DebugMode() then return end
     string = tostring(string)
     print( "[gebLib Debug] " .. string )
