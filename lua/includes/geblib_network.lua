@@ -13,8 +13,6 @@ if SERVER then
     util.AddNetworkString("gebLib.cl.core.UpdateAngle")
     util.AddNetworkString("gebLib.cl.core.UpdateColor")
     util.AddNetworkString("gebLib.cl.core.UpdateByIndex")
-    util.AddNetworkString("gebTest")
-    util.AddNetworkString("gebTest2")
 end
 
 //////////////////////////////////////
@@ -52,12 +50,10 @@ local TableToJSON   = util.TableToJSON
 //////////////////////////////////////
 
 gebLib_net = {}
-gebLib_net.VarsToIndexes = {
-    ["test_int"] = 0
-}
-gebLib_net.IndexedVars = {
-    [0] = "test_int"
-}
+
+--TODO: Add documentation to this
+gebLib_net.VarsToIndexes = {}
+gebLib_net.IndexedVars = {}
 
 --Helper functions
 function gebLib_net.UIntToBits(uInt)
@@ -312,6 +308,7 @@ if CLIENT then
             end
 
             --TODO: Too long, change
+            --TODO: Change to custom debug print
             print("Client: " .. tostring(LocalPlayer():GetName()) .. ", network message length: " .. len .. " bits, " .. "ent: " .. tostring(ent) .. ", variable name: " .. tostring(varName) .. ", variable value: " .. tostring(value) .. ", indexed: " .. tostring(isnumber(index)) .. ", index: " .. tostring(index))
         end
     end
