@@ -45,7 +45,6 @@ local TableToJSON   = util.TableToJSON
 -- local netReadData       = net.ReadData
 -- local netWriteBit       = net.WriteBit  
 -- local netReadBit        = net.ReadBit
-local
 //////////////////////////////////////
 --Helper functions
 local function NumberToBits(num)

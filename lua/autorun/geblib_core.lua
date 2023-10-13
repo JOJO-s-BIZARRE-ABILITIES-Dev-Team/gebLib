@@ -14,20 +14,21 @@ end
 --------------------------
 local includes = "includes/"
 --------------------------
-include( includes .. "geblib_utilities.lua" )
+--Once these files are not empty then commment them out, but as of now, they cause errors on include
+--include( includes .. "geblib_utilities.lua" )
 include( includes .. "geblib_network.lua" )
-include( includes .. "geblib_animation.lua" )
-include( includes .. "geblib_camera.lua" )
-include( includes .. "geblib_cinematics.lua" )
-include( includes .. "geblib_statuseffects.lua" )
+--include( includes .. "geblib_animation.lua" )
+--include( includes .. "geblib_camera.lua" )
+--include( includes .. "geblib_cinematics.lua" )
+--include( includes .. "geblib_statuseffects.lua" )
 --------------------------
 if SERVER then
-AddCSLuaFile( includes .. "geblib_utilities.lua" )
-AddCSLuaFile( includes .. "geblib_network.lua" )
-AddCSLuaFile( includes .. "geblib_animation.lua" )
-AddCSLuaFile( includes .. "geblib_camera.lua" )
-AddCSLuaFile( includes .. "geblib_cinematics.lua" )
-AddCSLuaFile( includes .. "geblib_statuseffects.lua" )
+    --AddCSLuaFile( includes .. "geblib_utilities.lua" )
+    AddCSLuaFile( includes .. "geblib_network.lua" )
+   -- AddCSLuaFile( includes .. "geblib_animation.lua" )
+    --AddCSLuaFile( includes .. "geblib_camera.lua" )
+    --AddCSLuaFile( includes .. "geblib_cinematics.lua" )
+    --AddCSLuaFile( includes .. "geblib_statuseffects.lua" )
 end
 --------------------------
 //
