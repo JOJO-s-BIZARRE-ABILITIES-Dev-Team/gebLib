@@ -56,7 +56,7 @@ gebLib_net.VarsToIndexes = {
     ["test_int"] = 0
 }
 gebLib_net.IndexedVars = {
-    "test_int"
+    [0] = "test_int"
 }
 
 --Helper functions
@@ -284,7 +284,6 @@ function gebLib_net.UpdateEntityUInt(ent, varName, numberToSet, bitsAmount)
     WriteBits(bitsAmount)
     net.WriteUInt(numberToSet, bitsAmount)
     WriteEntityAndVar(ent, varName)
-    print(net.BytesWritten())
     net.Broadcast()
 end
 
@@ -295,28 +294,36 @@ function gebLib_net.UpdateEntityFloat(ent, varName, numberToSet)
     net.Broadcast()
 end
 
-local ply = Entity(5)
+local ply = Entity(1)
 if SERVER then
     ply.test_int = 1
 
     gebLib_net.UpdateEntityValue(ply, "test_int", 5)
 end
 
-timer.Simple(0, function()
-    print(ply.test_int)
-end)
-
 --Handling for clients
 if CLIENT then
     local function DebugMessage(len, ent, varName, value)
         if gebLib.DebugMode() and gebLib.NetworkDebug() then
-            gebLib_PrintDebug(tostring(LocalPlayer()) .. ": network message length: " .. len .. " bits, " .. "ent: " .. tostring(ent) .. ", variable name: " .. varName .. ", variable value: " ..tostring(value))
+            local index = varName
+
+            if isnumber(index) then
+                varName = gebLib_net.IndexedVars[varName]
+            end
+
+            --TODO: Too long, change
+            print("Client: " .. tostring(LocalPlayer():GetName()) .. ", network message length: " .. len .. " bits, " .. "ent: " .. tostring(ent) .. ", variable name: " .. tostring(varName) .. ", variable value: " .. tostring(value) .. ", indexed: " .. tostring(isnumber(index)) .. ", index: " .. tostring(index))
         end
     end
 
     local function SetEntityValue(value, len)
         local ent, varName = ReadEntityAndVar()
         DebugMessage(len, ent, varName, value)
+
+        if isnumber(varName) then
+            varName = gebLib_net.IndexedVars[varName]
+        end
+
         if not ent:IsValid() then
             error("gebLib Networking: Trying to update variable: " .. varName .. " to value: " .. tostring(value) .. " on ent that is nil, ent might not be loaded or does not exist on the client!")
         end
