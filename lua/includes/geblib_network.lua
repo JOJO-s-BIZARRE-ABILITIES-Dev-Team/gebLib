@@ -16,9 +16,9 @@ if SERVER then
 end
 
 //////////////////////////////////////
-local rshift = bit.rshift
-local max = math.max
-local abs       = math.abs
+local rshift        = bit.rshift
+local max           = math.max
+local abs           = math.abs
 local mathFloor     = math.floor
 local mathLog       = math.log
 local isstring      = isstring

@@ -1,5 +1,4 @@
 gebLib_utils = {}
-gebLib_utils.__index = gebLib_utils
 --------------------------
 local MPLY = FindMetaTable("Player")
 local MENT = FindMetaTable("Entity")
