@@ -3,7 +3,6 @@
 //
 gebLib = {}
 gebLib.Version = "0.0.0"
-gebLib.Build   = "0"
 //
 --------------------------
 --TODO: make this work with varargs
@@ -20,9 +19,8 @@ include( includes .. "geblib_enums.lua" )
 include( includes .. "geblib_utilities.lua" )
 include( includes .. "geblib_cache.lua" )
 include( includes .. "geblib_network.lua" )
---include( includes .. "geblib_animation.lua" )
---include( includes .. "geblib_camera.lua" )
---include( includes .. "geblib_cinematics.lua" )
+include( includes .. "geblib_animation.lua" )
+include( includes .. "geblib_camera.lua" )
 include( includes .. "geblib_statuseffects.lua" )
 --------------------------
 if SERVER then
@@ -30,9 +28,8 @@ if SERVER then
     AddCSLuaFile( includes .. "geblib_utilities.lua" )
     AddCSLuaFile( includes .. "geblib_cache.lua" )
     AddCSLuaFile( includes .. "geblib_network.lua" )
-   -- AddCSLuaFile( includes .. "geblib_animation.lua" )
-    --AddCSLuaFile( includes .. "geblib_camera.lua" )
-    --AddCSLuaFile( includes .. "geblib_cinematics.lua" )
+    AddCSLuaFile( includes .. "geblib_animation.lua" )
+    AddCSLuaFile( includes .. "geblib_camera.lua" )
     AddCSLuaFile( includes .. "geblib_statuseffects.lua" )
 end
 --------------------------
