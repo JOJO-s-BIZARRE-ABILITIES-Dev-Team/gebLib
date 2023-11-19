@@ -19,7 +19,7 @@ include( includes .. "geblib_cache.lua" )
 include( includes .. "geblib_network.lua" )
 include( includes .. "geblib_animation.lua" )
 include( includes .. "geblib_camera.lua" )
-include( includes .. "geblib_statuseffects.lua" )
+include( includes .. "geblib_statuseffect.lua" )
 --------------------------
 if SERVER then
     AddCSLuaFile( includes .. "geblib_enums.lua" )
@@ -28,7 +28,7 @@ if SERVER then
     AddCSLuaFile( includes .. "geblib_network.lua" )
     AddCSLuaFile( includes .. "geblib_animation.lua" )
     AddCSLuaFile( includes .. "geblib_camera.lua" )
-    AddCSLuaFile( includes .. "geblib_statuseffects.lua" )
+    AddCSLuaFile( includes .. "geblib_statuseffect.lua" )
 end
 --------------------------
 //
