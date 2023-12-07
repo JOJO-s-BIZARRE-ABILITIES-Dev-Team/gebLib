@@ -12,11 +12,17 @@ local JSONToTable       = util.JSONToTable
 local Compress          = util.Compress
 local Decompress        = util.Decompress
 local netStart          = net.Start
-local netReadData       = net.ReadData
-local netReadUInt       = net.ReadUInt
-local netWriteUInt      = net.WriteUInt
+local netReceive        = net.Receive
 local netWriteData      = net.WriteData
+local netReadData       = net.ReadData
+local netWriteUInt      = net.WriteUInt
+local netReadUInt       = net.ReadUInt
+local netWriteFloat     = net.WriteFloat
+local netReadFloat      = net.ReadFloat
+local netWriteBool      = net.WriteBool
+local netReadBool       = net.ReadBool
 local netSend           = net.Send
+local netBroadcast      = net.Broadcast
 local TraceLine         = util.TraceLine
 local TraceHull         = util.TraceHull
 local tableInsert       = table.insert
@@ -33,6 +39,8 @@ local unpack            = unpack
 --------------------------
 if SERVER then
     util.AddNetworkString("gebLib.cl.utils.ChatAddText")
+    util.AddNetworkString("gebLib.cl.utils.PlayAnim")
+    util.AddNetworkString("gebLib.cl.utils.PlayAnim.Action")
 end
 --------------------------
 /////////////////////////
@@ -53,21 +61,91 @@ function MPLY:gebLib_ChatAddText( ... )
     netSend( self )
 end
 
-net.Receive("gebLib.cl.utils.ChatAddText", function()
-    local bytes = netReadUInt(16)
-    local data = netReadData(bytes)
+if CLIENT then
+    netReceive("gebLib.cl.utils.ChatAddText", function()
+        local bytes = netReadUInt(16)
+        local data = netReadData(bytes)
 
-    local json = Decompress(data)
-    local args = JSONToTable(json)
+        local json = Decompress(data)
+        local args = JSONToTable(json)
 
-    for k, v in ipairs( args ) do
-        if isstring(v) then
-            args[ k ] = language.GetPhrase( v )   
+        for k, v in ipairs( args ) do
+            if isstring(v) then
+                args[ k ] = language.GetPhrase( v )   
+            end
         end
+
+        chat.AddText( unpack( args ) )
+    end)
+end
+
+function MPLY:gebLib_PlaySequence( slot, sequence, cycle, autokill )
+    -- if CLIENT and !IsFirstTimePredicted() then return end
+
+    cycle = cycle or 0
+    autokill = autokill or true
+    if isstring( sequence ) then
+        sequence = self:LookupSequence( sequence )
     end
 
-    chat.AddText( unpack( args ) )
-end)
+    self:AddVCDSequenceToGestureSlot( slot, sequence, cycle, autokill )
+
+    if SERVER then
+        netStart( "gebLib.cl.utils.PlayAnim" )
+            netWriteUInt( self:EntIndex(), 6 )
+            netWriteUInt( slot, 3 )
+            netWriteUInt( sequence, 16 )
+            netWriteFloat( cycle )
+            netWriteBool( autokill )
+        netBroadcast()
+    end
+end
+
+function MPLY:gebLib_PlayAction( slot, sequence, playback )
+    -- if CLIENT and !IsFirstTimePredicted() then return end
+
+    playback = playback or 1
+    if isstring( sequence ) then
+        sequence = self:LookupSequence( sequence )
+    end
+
+    self:AddVCDSequenceToGestureSlot( slot, sequence, 0, true )
+    self:SetLayerPlaybackRate( 0, playback )
+
+    if SERVER then
+        net.Start( "gebLib.cl.utils.PlayAnim.Action" )
+            net.WriteUInt( self:EntIndex(), 6 )
+            net.WriteUInt( slot, 3 )
+            net.WriteUInt( sequence, 10 )
+            net.WriteFloat( playback )
+        net.Broadcast()
+    end
+end
+
+if CLIENT then
+    netReceive("gebLib.cl.utils.PlayAnim", function() 
+        local ply = Entity( net.ReadUInt( 6 ) )
+        if LocalPlayer() == ply then return end
+        
+        local slot = netReadUInt( 3 )
+        local anim = netReadUInt( 10 )
+        local cycle = netReadFloat()
+        local autokill = netReadBool()
+
+        ply:AddVCDSequenceToGestureSlot( slot, anim, cycle, autokill )
+    end)
+
+    netReceive("gebLib.cl.utils.PlayAnim.Action", function() 
+        local ply = Entity( net.ReadUInt( 6 ) )
+        if LocalPlayer() == ply then return end
+        
+        local anim = netReadUInt( 10 )
+        local playback = netReadFloat()
+
+        ply:AddVCDSequenceToGestureSlot( 0, anim, 0, true )
+        ply:SetLayerPlaybackRate( 0, playback )
+    end)
+end
 //
 --------------------------
 /////////////////////////
@@ -75,10 +153,7 @@ end)
 /////////////////////////
 --------------------------
 function MENT:gebLib_IsPerson()
-    if self:IsPlayer() or self:IsNPC() or self:IsNextBot() then
-        return true
-    end
-    return false
+    return self:IsPlayer() or self:IsNPC() or self:IsNextBot()
 end
 /////////////////////////
 function MENT:gebLib_Alive()
@@ -258,3 +333,11 @@ function gebLib_utils.TableEquals(tbl1, tbl2)
 	return false
 end
 /////////////////////////
+// BLACKLISTS
+////////////////////////
+gebLib.Blacklist = {}
+gebLib.Blacklist.KnockbackEntities = {
+    ["npc_strider"] = true,
+    ["func_door_rotating"] = true,
+    ["func_door"] = true,
+}
