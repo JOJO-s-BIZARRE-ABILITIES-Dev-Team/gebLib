@@ -94,11 +94,11 @@ local WriteBits = gebLib_net.WriteBits
 local ReadBits = gebLib_net.ReadBits
 
 function gebLib_net.WritePlayer(ply)
-    net.WriteUInt(ply:EntIndex(), UIntToBits(player.GetCount() - 1))
+    net.WriteUInt(ply:EntIndex(), UIntToBits(player.GetCount()))
 end
 
 function gebLib_net.ReadPlayer()
-    local bits = UIntToBits(player.GetCount() - 1)
+    local bits = UIntToBits(player.GetCount())
     return Entity(net.ReadUInt(bits))
 end
 
