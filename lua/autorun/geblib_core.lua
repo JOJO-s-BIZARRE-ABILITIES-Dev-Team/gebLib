@@ -11,8 +11,11 @@ function gebLib.PrintDebug(...) -- Equivalent to print(), however prints only if
 end
 --------------------------
 local includes = "includes/"
+local modules = includes .. "modules/"
 --------------------------
 --Once these files are not empty then commment them out, but as of now, they cause errors on include
+include( modules .. "print.lua" )
+include( modules .. "hook.lua" )
 include( includes .. "geblib_enums.lua" )
 include( includes .. "geblib_utilities.lua" )
 include( includes .. "geblib_cache.lua" )
@@ -23,6 +26,8 @@ include( includes .. "geblib_statuseffect.lua" )
 include( includes .. "geblib_powerlevels.lua" )
 --------------------------
 if SERVER then
+	AddCSLuaFile( modules .. "print.lua" )
+	AddCSLuaFile( modules .. "hook.lua" )
     AddCSLuaFile( includes .. "geblib_enums.lua" )
     AddCSLuaFile( includes .. "geblib_utilities.lua" )
     AddCSLuaFile( includes .. "geblib_cache.lua" )
@@ -48,8 +53,5 @@ function gebLib.NetworkDebug()
 end
 --------------------------
 // 
-
-
-
 
 // For some reason i enjoy making these frames for chunks of code
