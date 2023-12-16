@@ -1,3 +1,9 @@
+
+-- THANKS TO be1zebub FOR MAKING THIS LIBRARY
+-- Profile: https://github.com/Be1zebub
+-- PR: https://github.com/Facepunch/garrysmod/pull/2033
+-- I'm not sure if facepunch is going to merge this, so i'm going to include this here
+
 local white = Color( 230, 230, 230 )
 local red = Color( 212, 53, 109 )
 local yellow = Color( 212, 202, 107 )
