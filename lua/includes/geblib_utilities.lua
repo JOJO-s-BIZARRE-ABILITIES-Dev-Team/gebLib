@@ -333,6 +333,11 @@ function gebLib_utils.TableEquals(tbl1, tbl2)
 	return false
 end
 /////////////////////////
+// Vars
+/////////////////////////
+gebLib_tickrateMultiplier = math.Round( 66.66 * engine.TickInterval(), 2 )
+
+/////////////////////////
 // BLACKLISTS
 ////////////////////////
 gebLib.Blacklist = {}
