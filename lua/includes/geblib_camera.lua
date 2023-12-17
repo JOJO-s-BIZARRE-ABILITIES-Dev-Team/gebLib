@@ -1,16 +1,16 @@
 --This is the gebLib camera animation system
 if SERVER then return end
 
-gebLib_camera = {}
-gebLib_camera.__index = gebLib_camera
+gebLib_Camera = {}
+gebLib_Camera.__index = gebLib_Camera
 
 --------------------
 --Contributors: T0M
 --------------------
 
 --Constructor
-function gebLib_camera.New(name, ply, fps, maxFrames)
-    self = setmetatable({}, gebLib_camera)
+function gebLib_Camera.New(name, ply, fps, maxFrames)
+    self = setmetatable({}, gebLib_Camera)
 
     self.Name = name
     self.Player = ply
@@ -34,10 +34,10 @@ function gebLib_camera.New(name, ply, fps, maxFrames)
 end
 
 --General Functions
-function gebLib_camera:Play(simulate)
+function gebLib_Camera:Play(simulate)
     self.Playing = true
     self.Start = CurTime()
-    self.ThinkName = self.Player:GetName() .. self.Player:EntIndex() .. "gebLib_camera"
+    self.ThinkName = self.Player:GetName() .. self.Player:EntIndex() .. "gebLib_Camera"
 
     --Reset event start times
     for frame, data in pairs(self.Events) do
@@ -105,7 +105,7 @@ function gebLib_camera:Play(simulate)
     end
 end
 
-function gebLib_camera:Stop()
+function gebLib_Camera:Stop()
     self.EndFunc(self)
 
     self.Playing = false
@@ -113,15 +113,15 @@ function gebLib_camera:Stop()
     hook.Remove("Think", self.ThinkName)
 end
 
-function gebLib_camera:SetThink(func)
+function gebLib_Camera:SetThink(func)
     self.ThinkFunc = func
 end
 
-function gebLib_camera:SetEnd(func)
+function gebLib_Camera:SetEnd(func)
     self.EndFunc = func
 end
 
-function gebLib_camera:AddEvent(initFrame, endFrame, func)
+function gebLib_Camera:AddEvent(initFrame, endFrame, func)
     self.Events[initFrame] = {Function = func, Ended = false, EndFrame = endFrame, Start = 0}
 end
 
@@ -129,7 +129,7 @@ end
 --Returns the time based on the fps, end frame and the current frame, this should be used with every lerp function.
 --Formula for creating this
 --(CurTime() - someTimeBefore) / (eventLength / cameraFPS)
-function gebLib_camera:GetTime(eventFrame, mult)
+function gebLib_Camera:GetTime(eventFrame, mult)
     assert(eventFrame, "eventFrame it nil! Please specify the camera event.")
     mult = mult or 1
 
@@ -140,7 +140,7 @@ function gebLib_camera:GetTime(eventFrame, mult)
 end
 
 --Used for one time logic in events, because calcView can run faster than the cam's fps, so this ensures it gets run only once
-function gebLib_camera:FrameFirstTime(frame)
+function gebLib_Camera:FrameFirstTime(frame)
     if self.CurFrame >= frame and not self.FrameChecks[frame] then
         self.FrameChecks[frame] = true
         return true
