@@ -11,8 +11,8 @@ function gebLib.PrintDebug(...) -- Equivalent to print(), however prints only if
 end
 
 local function importFile(filePath)
-	include(filePath)
 	AddCSLuaFile(filePath)
+	include(filePath)
 end
 --------------------------
 local includes = "includes/"
