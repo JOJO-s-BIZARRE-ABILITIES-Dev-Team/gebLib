@@ -19,7 +19,6 @@ local includes = "includes/"
 local modules = includes .. "modules/"
 --------------------------
 importFile( modules .. "print.lua" )
-importFile( modules .. "hook.lua" )
 importFile( includes .. "geblib_enums.lua" )
 importFile( includes .. "geblib_utilities.lua" )
 importFile( includes .. "geblib_cache.lua" )
