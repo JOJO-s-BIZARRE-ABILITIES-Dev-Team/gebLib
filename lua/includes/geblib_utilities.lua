@@ -288,11 +288,11 @@ function MENT:gebLib_GetBoneHitBox(bone)
         end
     end
 end
---------------------------
+/////////////////////////
 function gebLib_utils.IsNormalized(vector)
 	return mathFloor( vector:LengthSqr() + 0.5 ) == 1
 end
---------------------------
+/////////////////////////
 function gebLib_utils.MatchFromTable(table, toMatch)
 	for _, v in ipairs(table) do
 		if stringmatch(toMatch, v) then
@@ -331,6 +331,24 @@ function gebLib_utils.TableEquals(tbl1, tbl2)
 		return true
 	end
 	return false
+end
+/////////////////////////
+--Technique to make projectiles aim where your crosshair is
+function gebLib_utils.GetPerfectProjectileTrajectory( posOfProjectile, shootPos, normal, filterEnts ) // By Denderino
+
+    local tr = util.TraceLine( {
+        start = shootPos,
+        endpos = shootPos + normal * 100000000,
+        filter = filterEnts,
+        mask = MASK_SHOT_HULL
+    } )
+    
+    local result = normal
+    if tr.Hit then
+        result = ( tr.HitPos - posOfProjectile )  
+    end
+    print( result )
+    return result 
 end
 /////////////////////////
 // Vars
