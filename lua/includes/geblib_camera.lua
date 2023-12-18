@@ -1,15 +1,16 @@
+--This is the gebLib camera animation system
 if SERVER then return end
 
-gebLib_Camera = {}
-gebLib_Camera.__index = gebLib_Camera
+gebLib_camera = {}
+gebLib_camera.__index = gebLib_camera
 
 --------------------
 --Contributors: T0M
 --------------------
 
 --Constructor
-function gebLib_Camera.New(name, ply, fps, maxFrames)
-    self = setmetatable({}, gebLib_Camera)
+function gebLib_camera.New(name, ply, fps, maxFrames)
+    self = setmetatable({}, gebLib_camera)
 
     self.Name = name
     self.Player = ply
@@ -24,41 +25,41 @@ function gebLib_Camera.New(name, ply, fps, maxFrames)
     self.ThinkFunc = nil
 
     self.CurFrame = 0
-    self.Start = 0
+    self.Start = 0 --Time the camera was started
     self.LastTime = 0
 
-    self.LastPos = vector_origin
-    self.LastAng = angle_zero
+    self.LastPos = nil
 
     return self
 end
 
 --General Functions
-function gebLib_Camera:Play(simulate)
+function gebLib_camera:Play(simulate)
     self.Playing = true
-    self.Start = SysTime()
-    self.ThinkName = self.Player:GetName() .. self.Player:EntIndex() .. "gebLib_Camera"
+    self.Start = CurTime()
+    self.ThinkName = self.Player:GetName() .. self.Player:EntIndex() .. "gebLib_camera"
 
     --Reset event start times
     for frame, data in pairs(self.Events) do
-        data.Start = SysTime()
+        data.Start = CurTime()
     end
     
     if not simulate then
         hook.Add("CalcView", self.ThinkName, function(ply, pos, angles, fov)
-            if not self.Player:IsValid() then self:Stop() end
-            
-            self.CurFrame = (SysTime() - self.Start) * self.FPS
+            if not self.Player:IsValid() then self:Stop() return end
+
+            self.CurFrame = (CurTime() - self.Start) * self.FPS
             local view = {
-                origin = pos,
-                angles = angles,
+                origin = vector_origin,
+                angles = angle_zero,
                 fov = fov,
                 drawviewer = true
             }
+
             if self.ThinkFunc and self.Playing then
                 self.ThinkFunc(self)
             end
-            
+    
             for frame, data in pairs(self.Events) do
                 if not data.Ended and data.Function and self.CurFrame >= frame and self.CurFrame <= data.EndFrame then
                     view.origin, view.angles = data.Function(ply, pos, angles, fov)
@@ -71,16 +72,15 @@ function gebLib_Camera:Play(simulate)
                 self.EndFunc(self)
                 self:Stop()
             end
-            
+    
             self.LastPos = view.origin
-            self.LastAng = view.angles
             return view
         end, HOOK_HIGH)
     else --For other players, simulate the camera behaviour, so everything is properly synced
         hook.Add("Think", self.ThinkName, function()
             if not self.Player:IsValid() then self:Stop() return end
 
-            self.CurFrame = (SysTime() - self.Start) * self.FPS
+            self.CurFrame = (CurTime() - self.Start) * self.FPS
             local ply = self.Player
             local pos = vector_origin
             local angles = angle_zero
@@ -105,7 +105,7 @@ function gebLib_Camera:Play(simulate)
     end
 end
 
-function gebLib_Camera:Stop()
+function gebLib_camera:Stop()
     self.EndFunc(self)
 
     self.Playing = false
@@ -113,32 +113,34 @@ function gebLib_Camera:Stop()
     hook.Remove("Think", self.ThinkName)
 end
 
-function gebLib_Camera:SetThink(func)
+function gebLib_camera:SetThink(func)
     self.ThinkFunc = func
 end
 
-function gebLib_Camera:SetEnd(func)
+function gebLib_camera:SetEnd(func)
     self.EndFunc = func
 end
 
-function gebLib_Camera:AddEvent(initFrame, endFrame, func)
+function gebLib_camera:AddEvent(initFrame, endFrame, func)
     self.Events[initFrame] = {Function = func, Ended = false, EndFrame = endFrame, Start = 0}
 end
 
 --Helper Functions
 --Returns the time based on the fps, end frame and the current frame, this should be used with every lerp function.
 --Formula for creating this
---(SysTime() - someTimeBefore) / (eventLength / cameraFPS)
-function gebLib_Camera:GetTime(startFrame, endFrame, mult)
+--(CurTime() - someTimeBefore) / (eventLength / cameraFPS)
+function gebLib_camera:GetTime(eventFrame, mult)
+    assert(eventFrame, "eventFrame it nil! Please specify the camera event.")
     mult = mult or 1
 
-    local result = math.Remap(self.CurFrame, startFrame, endFrame, 0, 1)
+    local event = self.Events[eventFrame]
+
+    local result = math.Remap(self.CurFrame, eventFrame, event.EndFrame, 0, 1)
     return math.Clamp(result * mult, 0, 1)
 end
 
---Used for one time logic in the current cinematic
---- if (Camera:FrameFirstTime(50)) then do stuff will only run once when the frame first ran
-function gebLib_Camera:FrameFirstTime(frame)
+--Used for one time logic in events, because calcView can run faster than the cam's fps, so this ensures it gets run only once
+function gebLib_camera:FrameFirstTime(frame)
     if self.CurFrame >= frame and not self.FrameChecks[frame] then
         self.FrameChecks[frame] = true
         return true
