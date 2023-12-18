@@ -9,29 +9,24 @@ function gebLib.PrintDebug(...) -- Equivalent to print(), however prints only if
     if !gebLib.DebugMode() then return end
     print("[gebLib Debug]", unpack({...}))
 end
+
+local function importFile(filePath)
+	AddCSLuaFile(filePath)
+	include(filePath)
+end
 --------------------------
 local includes = "includes/"
+local modules = includes .. "modules/"
 --------------------------
---Once these files are not empty then commment them out, but as of now, they cause errors on include
-include( includes .. "geblib_enums.lua" )
-include( includes .. "geblib_utilities.lua" )
-include( includes .. "geblib_cache.lua" )
-include( includes .. "geblib_network.lua" )
-include( includes .. "geblib_animation.lua" )
-include( includes .. "geblib_camera.lua" )
-include( includes .. "geblib_statuseffect.lua" )
-include( includes .. "geblib_powerlevels.lua" )
---------------------------
-if SERVER then
-    AddCSLuaFile( includes .. "geblib_enums.lua" )
-    AddCSLuaFile( includes .. "geblib_utilities.lua" )
-    AddCSLuaFile( includes .. "geblib_cache.lua" )
-    AddCSLuaFile( includes .. "geblib_network.lua" )
-    AddCSLuaFile( includes .. "geblib_animation.lua" )
-    AddCSLuaFile( includes .. "geblib_camera.lua" )
-    AddCSLuaFile( includes .. "geblib_statuseffect.lua" )
-    AddCSLuaFile( includes .. "geblib_powerlevels.lua" )
-end
+importFile( modules .. "print.lua" )
+importFile( includes .. "geblib_enums.lua" )
+importFile( includes .. "geblib_utilities.lua" )
+importFile( includes .. "geblib_cache.lua" )
+importFile( includes .. "geblib_network.lua" )
+importFile( includes .. "geblib_animation.lua" )
+importFile( includes .. "geblib_camera.lua" )
+importFile( includes .. "geblib_statuseffect.lua" )
+importFile( includes .. "geblib_powerlevels.lua" )
 --------------------------
 //
 --------------------------
@@ -48,8 +43,5 @@ function gebLib.NetworkDebug()
 end
 --------------------------
 // 
-
-
-
 
 // For some reason i enjoy making these frames for chunks of code
