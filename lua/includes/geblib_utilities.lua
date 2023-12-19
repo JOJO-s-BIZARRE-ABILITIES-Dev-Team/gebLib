@@ -384,7 +384,7 @@ if CLIENT then
     end
 
     function gebLib_utils.RemoveDebris( debris )
-        table.remove( gebLib__DebrisList, debris.TableIndex )
+        gebLib__DebrisList[ debris.TableIndex ] = nil
 
         debris:Remove()
     end
@@ -392,7 +392,7 @@ if CLIENT then
     hook.Add( "PostDrawTranslucentRenderables", "gebLib.Debris.RenderBlend", function( bDrawingDepth, bDrawingSkybox, bDraw3DSkybox  )
         if bDrawingSkybox or bDraw3DSkybox then return end
 
-        for k, debris in ipairs( gebLib__DebrisList ) do
+        for k, debris in pairs( gebLib__DebrisList ) do
             if !IsValid( debris ) then continue end
             if CurTime() > debris.LifeTime - 1 then
                 if !debris:GetNoDraw() then
