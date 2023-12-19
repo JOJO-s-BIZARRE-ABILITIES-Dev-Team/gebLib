@@ -371,12 +371,30 @@ if CLIENT then
         debris.TableIndex   = index
         debris.LifeTime     = CurTime() + finalLifeTime
 
-        local hookName = "gebLib.Debris.Think."  .. tostring( index )
-        hook.Add( "Think", hookName, function( )
-            if !IsValid( debris ) then hook.Remove( "Think", hookName ) return end
+        local hookNameThink = "gebLib.Debris.Think."  .. tostring( index )
+        hook.Add( "Think", hookNameThink, function( )
+            if !IsValid( debris ) then hook.Remove( "Think", hookNameThink ) return end
 
             if CurTime() > debris.LifeTime then
                 gebLib_utils.RemoveDebris( debris )
+            end
+        end)
+
+        local hookNameRender = "gebLib.Debris.PostDrawTranslucent."  .. tostring( index )
+        hook.Add( "PostDrawTranslucentRenderables", hookNameRender, function( )
+            if !IsValid( debris ) then hook.Remove( "PostDrawTranslucentRenderables", hookNameRender ) return end
+            if bDrawingSkybox or bDraw3DSkybox then return end
+
+            if CurTime() > debris.LifeTime - 1 then
+                if !debris:GetNoDraw() then
+                    debris:SetNoDraw( true )
+                end
+
+                local blend = Lerp( math.abs( debris.LifeTime - CurTime() - 1 ) / 1, 1, 0 )
+                
+                render.SetBlend( blend )
+                debris:DrawModel()
+                render.SetBlend( 1 )
             end
         end)
         //
@@ -388,26 +406,6 @@ if CLIENT then
 
         debris:Remove()
     end
-
-    hook.Add( "PostDrawTranslucentRenderables", "gebLib.Debris.RenderBlend", function( bDrawingDepth, bDrawingSkybox, bDraw3DSkybox  )
-        if bDrawingSkybox or bDraw3DSkybox then return end
-
-        for k, debris in pairs( gebLib__DebrisList ) do
-            if !IsValid( debris ) then continue end
-            if CurTime() > debris.LifeTime - 1 then
-                if !debris:GetNoDraw() then
-                    debris:SetNoDraw( true )
-                end
-
-                local blend = Lerp( math.abs( debris.LifeTime - CurTime() - 1 ) / 1, 1, 0 )
-                
-                print( blend )
-                render.SetBlend( blend )
-                debris:DrawModel()
-                render.SetBlend( 1 )
-            end
-        end
-    end)
 
 end
 /////////////////////////
