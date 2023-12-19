@@ -1,4 +1,8 @@
 gebLib_utils = {}
+
+if CLIENT then
+    gebLib__DebrisList = {} // table where we store existing debris
+end
 --------------------------
 local MPLY = FindMetaTable("Player")
 local MENT = FindMetaTable("Entity")
@@ -335,7 +339,6 @@ end
 /////////////////////////
 --Technique to make projectiles aim where your crosshair is
 function gebLib_utils.GetPerfectProjectileTrajectory( posOfProjectile, shootPos, normal, filterEnts ) // By Denderino
-
     local tr = util.TraceLine( {
         start = shootPos,
         endpos = shootPos + normal * 100000000,
@@ -347,8 +350,65 @@ function gebLib_utils.GetPerfectProjectileTrajectory( posOfProjectile, shootPos,
     if tr.Hit then
         result = ( tr.HitPos - posOfProjectile )  
     end
-    print( result )
     return result 
+end
+/////////////////////////
+// Debris
+/////////////////////////
+if CLIENT then
+
+    function gebLib_utils.CreateDebris( modelPath, isProp, lifeTime )
+        local debris
+        if isProp then
+            debris = ents.CreateClientProp( modelPath )
+        else
+            debris = ClientsideModel( modelPath )
+        end
+        //
+        local index = table.insert( gebLib__DebrisList, debris )
+        local finalLifeTime = lifeTime or 10
+
+        debris.TableIndex   = index
+        debris.LifeTime     = CurTime() + finalLifeTime
+
+        local hookName = "gebLib.Debris.Think."  .. tostring( index )
+        hook.Add( "Think", hookName, function( )
+            if !IsValid( debris ) then hook.Remove( "Think", hookName ) return end
+
+            if CurTime() > debris.LifeTime then
+                gebLib_utils.RemoveDebris( debris )
+            end
+        end)
+        //
+        return debris
+    end
+
+    function gebLib_utils.RemoveDebris( debris )
+        table.remove( gebLib__DebrisList, debris.TableIndex )
+
+        debris:Remove()
+    end
+
+    hook.Add( "PostDrawTranslucentRenderables", "gebLib.Debris.RenderBlend", function( bDrawingDepth, bDrawingSkybox, bDraw3DSkybox  )
+        if bDrawingSkybox or bDraw3DSkybox then return end
+
+        for k, debris in ipairs( gebLib__DebrisList ) do
+            if !IsValid( debris ) then continue end
+            if CurTime() > debris.LifeTime - 1 then
+                if !debris:GetNoDraw() then
+                    debris:SetNoDraw( true )
+                end
+
+                local blend = Lerp( math.abs( debris.LifeTime - CurTime() - 1 ) / 1, 1, 0 )
+                
+                print( blend )
+                render.SetBlend( blend )
+                debris:DrawModel()
+                render.SetBlend( 1 )
+            end
+        end
+    end)
+
 end
 /////////////////////////
 // Vars
