@@ -380,23 +380,15 @@ if CLIENT then
             end
         end)
 
-        local hookNameRender = "gebLib.Debris.PostDrawTranslucent."  .. tostring( index )
-        hook.Add( "PostDrawTranslucentRenderables", hookNameRender, function( )
-            if !IsValid( debris ) then hook.Remove( "PostDrawTranslucentRenderables", hookNameRender ) return end
-            if bDrawingSkybox or bDraw3DSkybox then return end
-
-            if CurTime() > debris.LifeTime - 1 then
-                if !debris:GetNoDraw() then
-                    debris:SetNoDraw( true )
-                end
-
-                local blend = Lerp( math.abs( debris.LifeTime - CurTime() - 1 ) / 1, 1, 0 )
-                
-                render.SetBlend( blend )
-                debris:DrawModel()
-                render.SetBlend( 1 )
+        debris.RenderOverride = function( self )
+            local blend = 1
+            if CurTime() > self.LifeTime - 1 then
+                blend = Lerp( math.abs( self.LifeTime - CurTime() - 1 ) / 1, 1, 0 )
             end
-        end)
+            render.SetBlend( blend )
+            self:DrawModel()
+            render.SetBlend( 1 )
+        end
         //
         return debris
     end
