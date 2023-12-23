@@ -161,6 +161,19 @@ end
 local WriteEntityAndVar = gebLib_net.WriteEntityAndVar
 local ReadEntityAndVar = gebLib_net.ReadEntityAndVar
 
+function gebLib_net.SendToAllExcept(excludePly)
+	if CLIENT then return end
+	local playersToSendTo = {}
+
+	for _, ply in player.Pairs() do
+		if ply == exludePly then continue end
+
+		table.insert(playersToSendTo, ply)
+	end
+
+	net.Send(playersToSendTo)
+end
+
 function gebLib_net.UpdateEntityValue(ent, varName, valueToSet)
     if CLIENT then return end
     ent[varName] = valueToSet
@@ -290,12 +303,12 @@ function gebLib_net.UpdateEntityFloat(ent, varName, numberToSet)
     net.Broadcast()
 end
 
-local ply = Entity(1)
-if SERVER then
-    ply.test_int = 1
+-- local ply = Entity(1)
+-- if SERVER then
+--     ply.test_int = 1
 
-    gebLib_net.UpdateEntityValue(ply, "test_int", 5)
-end
+--     gebLib_net.UpdateEntityValue(ply, "test_int", 5)
+-- end
 
 --Handling for clients
 if CLIENT then

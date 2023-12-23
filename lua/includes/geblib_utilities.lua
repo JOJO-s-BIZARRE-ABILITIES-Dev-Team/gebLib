@@ -45,6 +45,12 @@ if SERVER then
     util.AddNetworkString("gebLib.cl.utils.ChatAddText")
     util.AddNetworkString("gebLib.cl.utils.PlayAnim")
     util.AddNetworkString("gebLib.cl.utils.PlayAnim.Action")
+	util.AddNetworkString("gebLib.cl.utils.StopAnim")
+	util.AddNetworkString("gebLib.cl.utils.StopAnim.Action")
+	util.AddNetworkString("gebLib.cl.utils.PauseAnim")
+	util.AddNetworkString("gebLib.cl.utils.PauseAnim.Action")
+	util.AddNetworkString("gebLib.cl.utils.ResumeAnim")
+	util.AddNetworkString("gebLib.cl.utils.ResumeAnim.Action")
 end
 --------------------------
 /////////////////////////
@@ -96,7 +102,7 @@ function MPLY:gebLib_PlaySequence( slot, sequence, cycle, autokill )
 
     if SERVER then
         netStart( "gebLib.cl.utils.PlayAnim" )
-            netWriteUInt( self:EntIndex(), 6 )
+			gebLib_net.WriteEntity(self)
             netWriteUInt( slot, 3 )
             netWriteUInt( sequence, 16 )
             netWriteFloat( cycle )
@@ -105,49 +111,157 @@ function MPLY:gebLib_PlaySequence( slot, sequence, cycle, autokill )
     end
 end
 
-function MPLY:gebLib_PlayAction( slot, sequence, playback )
-    -- if CLIENT and !IsFirstTimePredicted() then return end
-
+function MPLY:gebLib_PlayAction(sequence, playback)
     playback = playback or 1
-    if isstring( sequence ) then
-        sequence = self:LookupSequence( sequence )
+    if isstring(sequence) then
+        sequence = self:LookupSequence(sequence)
     end
 
-    self:AddVCDSequenceToGestureSlot( slot, sequence, 0, true )
-    self:SetLayerPlaybackRate( 0, playback )
+    self:AddVCDSequenceToGestureSlot(1, sequence, 0, true)
+    self:SetLayerPlaybackRate(1, playback)
 
     if SERVER then
-        net.Start( "gebLib.cl.utils.PlayAnim.Action" )
-            net.WriteUInt( self:EntIndex(), 6 )
-            net.WriteUInt( slot, 3 )
-            net.WriteUInt( sequence, 10 )
-            net.WriteFloat( playback )
-        net.Broadcast()
+        net.Start("gebLib.cl.utils.PlayAnim.Action")
+			gebLib_net.WriteEntity(self)
+            net.WriteUInt(sequence, 10)
+            net.WriteFloat(playback)
+        gebLib_net.SendToAllExcept(self)
     end
+end
+
+function MPLY:gebLib_StopAnim(slot)
+	self:SetLayerDuration(slot, 0)
+	self:SetLayerPlaybackRate(slot, 0)
+
+	if SERVER then
+		net.Start("gebLib.cl.utils.StopAnim")
+		gebLib_net.WriteEntity(self)
+		net.WriteUInt(slot, 3)
+		gebLib_net.SendToAllExcept(self)
+	end
+end
+
+function MPLY:gebLib_StopAction()
+	self:SetLayerDuration(1, 0)
+	self:SetLayerPlaybackRate(1, 0)
+
+	if SERVER then
+		net.Start("gebLib.cl.utils.StopAnim.Action")
+		gebLib_net.WriteEntity(self)
+		gebLib_net.SendToAllExcept(self)
+	end
+end
+
+function MPLY:gebLib_PauseAnim(slot)
+	self:SetLayerPlaybackRate(slot, 0)
+
+	if SERVER then
+		net.Start("gebLib.cl.utils.PauseAnim")
+		gebLib_net.WriteEntity(self)
+		net.WriteUInt(slot, 3)
+		gebLib_net.SendToAllExcept(self)
+	end
+end
+
+function MPLY:gebLib_PauseAction()
+	self:SetLayerPlaybackRate(1, 0)
+
+	if SERVER then
+		net.Start("gebLib.cl.utils.PauseAnim.Action")
+		gebLib_net.WriteEntity(self)
+		gebLib_net.SendToAllExcept(self)
+	end
+end
+
+function MPLY:gebLib_ResumeAnim(slot, playback)
+	playback = playback or 1
+	
+	self:SetLayerPlaybackRate(slot, playback)
+
+	if SERVER then
+		net.Start("gebLib.cl.utils.ResumeAnim")
+		gebLib_net.WriteEntity(self)
+		net.WriteUInt(slot, 3)
+		net.WriteFloat(playback)
+		gebLib_net.SendToAllExcept(self)
+	end
+end
+
+function MPLY:gebLib_ResumeAction(playback)
+	playback = playback or 1
+
+	self:SetLayerPlaybackRate(1, playback)
+
+	if SERVER then
+		net.Start("gebLib.cl.utils.ResumeAnim.Action")
+		gebLib_net.WriteEntity(self)
+		net.WriteFloat(playback)
+		gebLib_net.SendToAllExcept(self)
+	end
 end
 
 if CLIENT then
     netReceive("gebLib.cl.utils.PlayAnim", function() 
-        local ply = Entity( net.ReadUInt( 6 ) )
-        if LocalPlayer() == ply then return end
+        local ply = gebLib_net.ReadEntity()
         
         local slot = netReadUInt( 3 )
         local anim = netReadUInt( 10 )
         local cycle = netReadFloat()
         local autokill = netReadBool()
 
-        ply:AddVCDSequenceToGestureSlot( slot, anim, cycle, autokill )
+		ply:gebLib_PlaySequence(slot, anim, cycle, autokill)
     end)
 
     netReceive("gebLib.cl.utils.PlayAnim.Action", function() 
-        local ply = Entity( net.ReadUInt( 6 ) )
-        if LocalPlayer() == ply then return end
+        local ply = gebLib_net.ReadEntity()
         
-        local anim = netReadUInt( 10 )
+        local anim = netReadUInt(10)
         local playback = netReadFloat()
 
-        ply:AddVCDSequenceToGestureSlot( 0, anim, 0, true )
-        ply:SetLayerPlaybackRate( 0, playback )
+		ply:gebLib_PlayAction(anim, playback)
+    end)
+
+	netReceive("gebLib.cl.utils.StopAnim", function() 
+        local ply = gebLib_net.ReadEntity()
+        
+        local slot = netReadUInt(3)
+
+		ply:gebLib_StopAnim(slot)
+    end)
+
+	netReceive("gebLib.cl.utils.StopAnim.Action", function() 
+        local ply = gebLib_net.ReadEntity()
+		ply:gebLib_StopAction()
+    end)
+
+	netReceive("gebLib.cl.utils.PauseAnim", function() 
+        local ply = gebLib_net.ReadEntity()
+        
+        local slot = netReadUInt(3)
+
+		ply:gebLib_PauseAnim(slot)
+    end)
+
+	netReceive("gebLib.cl.utils.PauseAnim.Action", function() 
+        local ply = gebLib_net.ReadEntity()
+		ply:gebLib_PauseAction()
+    end)
+
+	netReceive("gebLib.cl.utils.ResumeAnim", function() 
+        local ply = gebLib_net.ReadEntity()
+        
+        local slot = netReadUInt(3)
+		local playback = net.ReadFloat()
+
+		ply:gebLib_ResumeAnim(slot, playback)
+    end)
+
+	netReceive("gebLib.cl.utils.ResumeAnim.Action", function() 
+        local ply = gebLib_net.ReadEntity()
+
+		local playback = net.ReadFloat()
+
+		ply:gebLib_ResumeAction(playback)
     end)
 end
 //
@@ -161,7 +275,7 @@ function MENT:gebLib_IsPerson()
 end
 /////////////////////////
 function MENT:gebLib_Alive()
-    if not self:IsValid() then return end
+    if not self:IsValid() then return false end
     if !self:gebLib_IsPerson() then return false end
 
     if !self:IsPlayer() and self:Health() > 0 then
@@ -169,6 +283,7 @@ function MENT:gebLib_Alive()
     elseif self:IsPlayer() and self:Alive() then
         return true
     end
+
     return false
 end
 /////////////////////////
