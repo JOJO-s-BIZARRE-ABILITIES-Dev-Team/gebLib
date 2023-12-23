@@ -10,13 +10,16 @@ function gebLib.PrintDebug(...) -- Equivalent to print(), however prints only if
     print("[gebLib Debug]", unpack({...}))
 end
 
-local function importFile(filePath)
-	AddCSLuaFile(filePath)
-	include(filePath)
+local function importFile( filePath, clientOnly )
+	AddCSLuaFile( filePath )
+	if !clientOnly or ( clientOnly and CLIENT ) then
+		include( filePath )
+	end
 end
 --------------------------
 local includes = "includes/"
 local modules = includes .. "modules/"
+local iderma = includes .. "derma/"
 --------------------------
 importFile( modules .. "print.lua" )
 importFile( includes .. "geblib_enums.lua" )
@@ -27,6 +30,11 @@ importFile( includes .. "geblib_animation.lua" )
 importFile( includes .. "geblib_camera.lua" )
 importFile( includes .. "geblib_statuseffect.lua" )
 importFile( includes .. "geblib_powerlevels.lua" )
+--------------------------
+// INCLUDING DERMA
+--------------------------
+importFile( iderma .. "geblib_skilltree.lua", true )
+importFile( iderma .. "geblib_skillnode.lua", true )
 --------------------------
 //
 --------------------------
