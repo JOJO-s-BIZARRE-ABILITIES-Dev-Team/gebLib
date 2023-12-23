@@ -34,7 +34,7 @@ function MENT:gebLib_SetPowerLevel( powerLevel )
         netStart( "gebLib.cl.powerlevel.SetPowerLevel" )
             netWriteEntity( self )
             netWriteFloat( powerLevel )
-        netBroadcast( self )
+        netBroadcast()
     end
 
     self.gebLib_PowerLevel = powerLevel
