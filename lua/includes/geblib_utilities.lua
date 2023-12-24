@@ -517,16 +517,16 @@ end
 
 function gebLib_utils.SortText( num, min )
     local values = { 
-        { 1000, "K" },
-        { 1000000, "M" },
-        { 1000000000, "B" }, 
-        { 1000000000000, "T" }, 
-        { 1000000000000000, "Qa" }, 
-        { 1000000000000000000, "Qi" }, 
-        { 1000000000000000000000, "Sx" }, 
-        { 1000000000000000000000000, "Sp" }, 
-        { 1000000000000000000000000000, "O" }, 
-        { 1000000000000000000000000000, "N" }, 
+        { math.pow( 10, 3 ), "K" },
+        { math.pow( 10, 6 ), "M" },
+        { math.pow( 10, 9 ), "B" }, 
+        { math.pow( 10, 12 ), "T" }, 
+        { math.pow( 10, 15 ), "Qa" }, 
+        { math.pow( 10, 18 ), "Qi" }, 
+        { math.pow( 10, 21 ), "Sx" }, 
+        { math.pow( 10, 24 ), "Sp" }, 
+        { math.pow( 10, 27 ), "O" }, 
+        { math.pow( 10, 30 ), "N" }, 
     }
     local str = ""
     if isstring( num ) then num = tonumber(num) end
