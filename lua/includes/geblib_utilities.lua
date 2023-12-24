@@ -513,8 +513,31 @@ if CLIENT then
 
         debris:Remove()
     end
-
 end
+
+function gebLib_utils.SortText( num, min )
+    local values = { 
+        { 1000, "K" },
+        { 1000000, "M" },
+        { 1000000000, "B" }, 
+        { 1000000000000, "T" }, 
+        { 1000000000000000, "Qa" }, 
+        { 1000000000000000000, "Qi" }, 
+        { 1000000000000000000000, "Sx" }, 
+        { 1000000000000000000000000, "Sp" }, 
+        { 1000000000000000000000000000, "O" }, 
+        { 1000000000000000000000000000, "N" }, 
+    }
+    local str = ""
+    if isstring( num ) then num = tonumber(num) end
+    for i = 1, #values do
+        if num >= values[i][1] then
+            str = ( math.Round( num / values[i][1], 1 ) ) .. values[i][2]
+        end
+    end
+    return (num < min and num or str)
+end
+
 /////////////////////////
 // Vars
 /////////////////////////
