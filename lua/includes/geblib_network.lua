@@ -170,8 +170,7 @@ function gebLib_net.SendToAllExcept(excludePly)
 
 		table.insert(playersToSendTo, ply)
 	end
-
-	PrintTable(playersToSendTo)
+	
 	net.Send(playersToSendTo)
 end
 
