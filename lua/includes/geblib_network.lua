@@ -166,11 +166,12 @@ function gebLib_net.SendToAllExcept(excludePly)
 	local playersToSendTo = {}
 
 	for _, ply in player.Pairs() do
-		if ply == exludePly then continue end
+		if ply == excludePly then continue end
 
 		table.insert(playersToSendTo, ply)
 	end
 
+	PrintTable(playersToSendTo)
 	net.Send(playersToSendTo)
 end
 
