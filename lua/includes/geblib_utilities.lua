@@ -273,6 +273,10 @@ end
 function MENT:gebLib_IsPerson()
     return self:IsPlayer() or self:IsNPC() or self:IsNextBot()
 end
+
+function MENT:gebLib_IsProp()
+	return self:GetClass() == "prop_physics"
+end
 /////////////////////////
 function MENT:gebLib_Alive()
     if not self:IsValid() then return false end
@@ -286,6 +290,17 @@ function MENT:gebLib_Alive()
 
     return false
 end
+
+function MENT:gebLib_Dissolve(dissolveTime)
+	if CLIENT then return end
+
+	self.gebLib_DissolveEnt = ents.Create("env_entity_dissolver")
+	self.gebLib_DissolveEnt:SetOwner(self)
+	self.gebLib_DissolveEnt:Spawn()
+	self.gebLib_DissolveEnt:SetSaveValue("dissolvetype", 0)
+	self.gebLib_DissolveEnt:Fire("Dissolve", "!activator", dissolveTime, self)
+end
+
 /////////////////////////
 function MENT:gebLib_IsLookingAt(vec, minDiff)
     minDiff = minDiff or 0.90
@@ -471,7 +486,6 @@ end
 // Debris
 /////////////////////////
 if CLIENT then
-
     function gebLib_utils.CreateDebris( modelPath, isProp, lifeTime )
         local debris
         if isProp then
