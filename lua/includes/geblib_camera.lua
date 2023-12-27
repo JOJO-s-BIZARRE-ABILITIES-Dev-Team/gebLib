@@ -30,6 +30,7 @@ function gebLib_Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHook
     self.FrameChecks = {}
 
     self.Playing = false
+	self.Simulated = false
     self.ThinkName = nil
     self.EndFunc = nil
     self.ThinkFunc = nil
@@ -58,6 +59,7 @@ function gebLib_Camera:Play(simulate)
     self.Playing = true
     self.Start = SysTime()
     self.ThinkName = tostring(self)
+	self.Simulated = simulate
 
 	self:AddDefaultHooks()
 
@@ -188,7 +190,7 @@ function gebLib_Camera:AddFakePlayerCopy()
 	copy:SetSequence(ply:GetSequence())
 	copy.RenderOverride = RenderOverride
 	self.Copy = copy
-	self.Player.gJujutsu_Copy = copy
+	ply.gJujutsu_Copy = copy
 end
 
 function gebLib_Camera:AddDefaultHooks()
@@ -203,7 +205,7 @@ function gebLib_Camera:AddDefaultHooks()
 	local start = SysTime()
 	local animDuration = 1 
 
-	if LocalPlayer() == self.Player then
+	if not self.Simulated then
 		hook.Add("DrawOverlay", tostring(self) .. "_BlackBars", function()
 			local lerpedSize = Lerp((SysTime() - start) / animDuration, 0, blackBarSize)
 			local lerpedBottom = Lerp((SysTime() - start) / animDuration, screenHeight + 1, bottomPos) --Need to lerp the bottom pos, so it goes from down to up
@@ -221,7 +223,7 @@ function gebLib_Camera:AddDefaultHooks()
 	hook.Add("Think", tostring(self) .. "_DefaultThink", function()
 		local owner = self.Player
 
-		if not self:IsValid() then cameraStop() return end
+		if not self:IsValid() then self:Stop() return end
 
         owner:SetNoDraw(true)
         owner:SetEyeAngles(self.OldAng)
