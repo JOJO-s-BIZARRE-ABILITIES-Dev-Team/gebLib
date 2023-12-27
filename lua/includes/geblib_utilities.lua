@@ -143,9 +143,12 @@ end
 
 function MPLY:gebLib_StopAction()
 	self:SetLayerDuration(1, 0)
-	self:SetLayerPlaybackRate(1, 0)
+	self:SetLayerCycle(1, 1)
+	self:SetLayerPlaybackRate(1, 1)
 
 	if SERVER then
+		self:SetLayerLooping(1, false)
+
 		net.Start("gebLib.cl.utils.StopAnim.Action")
 		gebLib_net.WriteEntity(self)
 		gebLib_net.SendToAllExcept(self)

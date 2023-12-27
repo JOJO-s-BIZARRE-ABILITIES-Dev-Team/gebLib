@@ -18,6 +18,7 @@ function gebLib_Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHook
 	if createFake == nil then createFake = true end
 	if useDefaultHooks == nil then useDefaultHooks = true end
 	if fps == nil then fps = 60 end
+	if maxFrames and maxFrames < 0 then maxFrames = nil end
 	
     self = setmetatable({}, gebLib_Camera)
 
@@ -45,27 +46,9 @@ function gebLib_Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHook
     self.LastPos = vector_origin
     self.LastAng = angle_zero
 
-	if not createFake then return self end
-    
-    --Experimental
-    local angles = ply:GetAimVector():Angle()
-    angles:Normalize()
-    angles.x = 0
-
-	local oldPos = ply:GetPos()
-
-	self.OldPos = oldPos
-	self.OldAng = angles
-
-	local copy = ClientsideModel(ply:GetModel())
-    copy:SetPos(oldPos)
-    copy:SetAngles(angles)
-    copy:SetSkin(ply:GetSkin())
-    copy:SetPlaybackRate(1)
-	copy:SetBodygroup(1, 1)
-	copy:SetSequence(ply:GetSequence())
-	copy.RenderOverride = RenderOverride
-	self.Copy = copy
+	if createFake then
+		self:AddFakePlayerCopy()
+	end
 
     return self
 end
@@ -82,6 +65,19 @@ function gebLib_Camera:Play(simulate)
     for frame, data in pairs(self.Events) do
         data.Start = SysTime()
     end
+
+	-- If user has not specified the ending frame of the camera, then try to figure it from events
+	if not self.MaxFrames then
+		local largestEventFrame = -1
+	
+		for frame, data in pairs(self.Events) do
+			if data.EndFrame > largestEventFrame then
+				largestEventFrame = data.EndFrame
+			end
+		end
+
+		self.MaxFrames = largestEventFrame
+	end
     
     if not simulate then
         hook.Add("CalcView", self.ThinkName, function(ply, pos, angles, fov)
@@ -168,6 +164,31 @@ function gebLib_Camera:AddEvent(initFrame, endFrame, func)
 	end
 
     self.Events[initFrame] = {Function = func, Ended = false, EndFrame = endFrame, Start = 0}
+end
+
+function gebLib_Camera:AddFakePlayerCopy()
+	local ply = self.Player
+    
+    --Experimental
+    local angles = ply:GetAimVector():Angle()
+    angles:Normalize()
+    angles.x = 0
+
+	local oldPos = ply:GetPos()
+
+	self.OldPos = oldPos
+	self.OldAng = angles
+
+	local copy = ClientsideModel(ply:GetModel())
+    copy:SetPos(oldPos)
+    copy:SetAngles(angles)
+    copy:SetSkin(ply:GetSkin())
+    copy:SetPlaybackRate(1)
+	copy:SetBodygroup(1, 1)
+	copy:SetSequence(ply:GetSequence())
+	copy.RenderOverride = RenderOverride
+	self.Copy = copy
+	self.Player.gJujutsu_Copy = copy
 end
 
 function gebLib_Camera:AddDefaultHooks()
