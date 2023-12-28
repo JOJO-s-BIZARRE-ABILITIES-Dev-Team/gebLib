@@ -190,7 +190,6 @@ function gebLib_Camera:AddFakePlayerCopy()
 	copy:SetSequence(ply:GetSequence())
 	copy.RenderOverride = RenderOverride
 	self.Copy = copy
-	ply.gJujutsu_Copy = copy
 end
 
 function gebLib_Camera:AddDefaultHooks()
