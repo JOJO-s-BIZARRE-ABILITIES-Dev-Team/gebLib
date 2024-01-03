@@ -277,8 +277,13 @@ function MENT:gebLib_IsPerson()
     return self:IsPlayer() or self:IsNPC() or self:IsNextBot()
 end
 
+local props = {
+    ["prop_physics"] = true,
+    ["prop_physics_multiplayer"] = true,
+    ["prop_dynamic"] = true,    
+}
 function MENT:gebLib_IsProp()
-	return self:GetClass() == "prop_physics"
+	return props[self:GetClass()]
 end
 /////////////////////////
 function MENT:gebLib_Alive()
