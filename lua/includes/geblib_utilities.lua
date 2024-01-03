@@ -58,17 +58,25 @@ end
 /////////////////////////
 --------------------------
 function MPLY:gebLib_ChatAddText( ... )
-    if CLIENT then return end
     local args = { ... }
+    if CLIENT then 
+        for k, v in ipairs( args ) do
+            if isstring(v) then
+                args[ k ] = language.GetPhrase( v )   
+            end
+        end
 
-    local json = TableToJSON( args )
-    local data = Compress( json )
-    local bytes = #data
+        chat.AddText( unpack( args ) )
+    else
+        local json = TableToJSON( args )
+        local data = Compress( json )
+        local bytes = #data
 
-    netStart( "gebLib.cl.utils.ChatAddText" )
-        netWriteUInt( bytes, 16 )
-        netWriteData( data, bytes )
-    netSend( self )
+        netStart( "gebLib.cl.utils.ChatAddText" )
+            netWriteUInt( bytes, 16 )
+            netWriteData( data, bytes )
+        netSend( self )
+    end
 end
 
 if CLIENT then
