@@ -489,7 +489,7 @@ function gebLib_utils.GetPerfectProjectileTrajectory( posOfProjectile, shootPos,
         start = shootPos,
         endpos = shootPos + normal * 100000000,
         filter = filterEnts,
-        mask = MASK_SHOT_HULL
+        mask = MASK_SHOT_HULL,
     } )
     
     local result = normal
@@ -515,17 +515,30 @@ if CLIENT then
 
         debris.TableIndex   = index
         debris.LifeTime     = CurTime() + finalLifeTime
+        debris.DoAnimation  = true
 
         local hookNameThink = "gebLib.Debris.Think."  .. tostring( index )
+
         hook.Add( "Think", hookNameThink, function( )
             if !IsValid( debris ) then hook.Remove( "Think", hookNameThink ) return end
 
             if CurTime() > debris.LifeTime then
                 gebLib_utils.RemoveDebris( debris )
             end
+
+            if debris.DoAnimation then
+                if !debris.DesiredModelScale then 
+                    debris.DesiredModelScale = debris:GetModelScale()
+                    debris:SetModelScale( 0, 0 )
+                end
+
+                debris:SetModelScale( Lerp( math.ease.InOutSine( FrameTime() * 24 ), debris:GetModelScale(), debris.DesiredModelScale ) )
+            end
         end)
 
         debris.RenderOverride = function( self )
+            if LocalPlayer():GetPos():Distance( self:GetPos() ) >= 5000 then return end
+
             local blend = 1
             if CurTime() > self.LifeTime - 1 then
                 blend = Lerp( math.abs( self.LifeTime - CurTime() - 1 ) / 1, 1, 0 )
