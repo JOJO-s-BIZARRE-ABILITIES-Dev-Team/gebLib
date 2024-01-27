@@ -526,12 +526,12 @@ if CLIENT then
                 gebLib_utils.RemoveDebris( debris )
             end
 
-            if debris.DoAnimation then
+            if debris.DoAnimation and debris:GetModelScale() then
                 if !debris.DesiredModelScale then 
                     debris.DesiredModelScale = debris:GetModelScale()
                     debris:SetModelScale( 0, 0 )
                 end
-
+				
                 debris:SetModelScale( Lerp( math.ease.InOutSine( FrameTime() * 24 ), debris:GetModelScale(), debris.DesiredModelScale ) )
             end
         end)
