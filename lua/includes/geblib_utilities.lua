@@ -98,7 +98,7 @@ if CLIENT then
 end
 
 function MPLY:gebLib_PlaySequence( slot, sequence, cycle, autokill )
-    -- if CLIENT and !IsFirstTimePredicted() then return end
+	if not IsFirstTimePredicted() then return end
 
     cycle = cycle or 0
     autokill = autokill or true
@@ -121,6 +121,9 @@ end
 
 function MPLY:gebLib_PlayAction(sequence, playback)
     playback = playback or 1
+
+	if not IsFirstTimePredicted() then return end
+
     if isstring(sequence) then
         sequence = self:LookupSequence(sequence)
     end
