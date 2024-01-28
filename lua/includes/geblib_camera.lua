@@ -1,5 +1,3 @@
-if SERVER then return end
-
 gebLib_Camera = {}
 gebLib_Camera.__index = gebLib_Camera
 
@@ -47,7 +45,7 @@ function gebLib_Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHook
     self.LastPos = vector_origin
     self.LastAng = angle_zero
 
-	if createFake then
+	if createFake and CLIENT then
 		self:AddFakePlayerCopy()
 	end
 
@@ -80,6 +78,24 @@ function gebLib_Camera:Play(simulate)
 
 		self.MaxFrames = largestEventFrame
 	end
+	
+	print(self.MaxFrames)
+
+	if SERVER then
+		hook.Add("Think", self.ThinkName, function()
+			self.CurFrame = (SysTime() - self.Start) * self.FPS
+
+			if self.ThinkFunc and self.Playing then
+                self.ThinkFunc(self)
+            end
+
+			if self.CurFrame >= self.MaxFrames then
+                self:Stop()
+            end
+		end)
+
+		return
+	end
     
     if not simulate then
         hook.Add("CalcView", self.ThinkName, function(ply, pos, angles, fov)
@@ -105,7 +121,7 @@ function gebLib_Camera:Play(simulate)
             end
             
             if self.CurFrame >= self.MaxFrames then
-                self.EndFunc(self)
+                self.EndFunc(self) -- TODO: Not sure about this
                 self:Stop()
             end
             
@@ -149,7 +165,9 @@ function gebLib_Camera:Stop()
     self.Playing = false
 
 	self.Player:SetNoDraw(false)
-	self.Copy:Remove()
+	if CLIENT then
+		self.Copy:Remove()
+	end
 end
 
 function gebLib_Camera:SetThink(func)
