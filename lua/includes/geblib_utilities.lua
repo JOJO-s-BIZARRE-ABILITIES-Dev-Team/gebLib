@@ -97,8 +97,14 @@ if CLIENT then
     end)
 end
 
+function MPLY:gebLib_PredictedOrDifferentPlayer()
+	if SERVER then return true end
+
+	return IsFirstTimePredicted() or LocalPlayer() ~= self
+end
+
 function MPLY:gebLib_PlaySequence( slot, sequence, cycle, autokill )
-	if not IsFirstTimePredicted() then return end
+	if not self:gebLib_PredictedOrDifferentPlayer() then return end
 
     cycle = cycle or 0
     autokill = autokill or true
@@ -122,7 +128,7 @@ end
 function MPLY:gebLib_PlayAction(sequence, playback)
     playback = playback or 1
 
-	if not IsFirstTimePredicted() then return end
+	if not self:gebLib_PredictedOrDifferentPlayer() then return end
 
     if isstring(sequence) then
         sequence = self:LookupSequence(sequence)
