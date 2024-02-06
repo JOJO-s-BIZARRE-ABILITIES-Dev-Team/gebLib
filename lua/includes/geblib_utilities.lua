@@ -97,6 +97,10 @@ if CLIENT then
     end)
 end
 
+function MPLY:gebLib_ValidAndAlive()
+	return self:IsValid() and self:Alive()
+end
+
 function MPLY:gebLib_PredictedOrDifferentPlayer()
 	if SERVER then return true end
 
