@@ -567,24 +567,27 @@ if CLIENT then
     end
 end
 
+local pow = math.pow
+local formattedNums = {
+	{ pow( 10, 3 ), "K" },
+	{ pow( 10, 6 ), "M" },
+	{ pow( 10, 9 ), "B" }, 
+	{ pow( 10, 12 ), "T" }, 
+	{ pow( 10, 15 ), "Qa" }, 
+	{ pow( 10, 18 ), "Qi" }, 
+	{ pow( 10, 21 ), "Sx" }, 
+	{ pow( 10, 24 ), "Sp" }, 
+	{ pow( 10, 27 ), "O" }, 
+	{ pow( 10, 30 ), "N" },
+}
+
 function gebLib_utils.SortText( num, min )
-    local values = { 
-        { math.pow( 10, 3 ), "K" },
-        { math.pow( 10, 6 ), "M" },
-        { math.pow( 10, 9 ), "B" }, 
-        { math.pow( 10, 12 ), "T" }, 
-        { math.pow( 10, 15 ), "Qa" }, 
-        { math.pow( 10, 18 ), "Qi" }, 
-        { math.pow( 10, 21 ), "Sx" }, 
-        { math.pow( 10, 24 ), "Sp" }, 
-        { math.pow( 10, 27 ), "O" }, 
-        { math.pow( 10, 30 ), "N" }, 
-    }
     local str = ""
+
     if isstring( num ) then num = tonumber(num) end
-    for i = 1, #values do
-        if num >= values[i][1] then
-            str = ( math.Round( num / values[i][1], 1 ) ) .. values[i][2]
+    for i = 1, #formattedNums do
+        if num >= formattedNums[i][1] then
+            str = ( math.Round( num / formattedNums[i][1], 1 ) ) .. formattedNums[i][2]
         end
     end
     return (num < min and num or str)
