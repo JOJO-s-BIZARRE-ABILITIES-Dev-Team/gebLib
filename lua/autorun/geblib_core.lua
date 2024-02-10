@@ -53,3 +53,25 @@ end
 // 
 
 // For some reason i enjoy making these frames for chunks of code
+
+-- Player connnection handling
+if SERVER then
+    local playersConnected = {}
+    gameevent.Listen("OnRequestFullUpdate")
+
+    hook.Add("OnRequestFullUpdate", "gebLib_InitialConnect", function(data)
+        if not playersConnected[data.userid] then
+            playersConnected[data.userid] = true
+            -- Needs to be run on the next tick, because this runs slighty before client stage, so we cannot send net messages to players
+            timer.Simple(0, function()
+                hook.Run("gebLib_PlayerFullyConnected", Player(data.userid))
+            end)
+        end
+    end)
+end
+
+if CLIENT then
+    hook.Add( "InitPostEntity", "gebLib_InitialConnect", function()
+        hook.Run("gebLib_PlayerFullyConnected", LocalPlayer())
+    end)
+end
