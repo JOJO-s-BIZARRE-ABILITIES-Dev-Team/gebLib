@@ -1,11 +1,107 @@
 gebLib_utils = {}
 
+gebLib_ClassBlacklist = {
+	["domain_floor"] = true,
+	["func_button"] = true,
+	["prop_door_rotating"] = true,
+	["class C_BaseEntity"] = true,
+	["entityflame"] = true,
+	["trigger_soundscape"] = true,
+	["info_player_start"] = true,
+	["info_player_counterterrorist"] = true,
+	["trigger_teleport"] = true,
+	["info_teleport_destination"] = true,
+	["func_brush"] = true,
+	["func_areaportalwindow"] = true,
+	["predicted_viewmodel"] = true,
+	["physgun_beam"] = true,
+	["env_sprite"] = true,
+	["point_spotlight"] = true,
+	["spotlight_end"] = true,
+	["beam"] = true,
+	["env_soundscape_triggerable"] = true,
+	["phys_bone_follower"] = true,
+	["path_track"] = true,
+	["info_target"] = true,
+	["ambient_generic"] = true,
+	["lua_run"] = true,
+	["point_hurt"] = true,
+	["env_entity_dissolver"] = true,
+	["info_ladder_dismount"] = true,
+	["func_useableladder"] = true,
+	["func_door"] = true,
+	["func_areaportal"] = true,
+	["water_lod_control"] = true,
+	["env_tonemap_controller"] = true,
+	["func_door_rotating"] = true,
+	["trigger_hurt"] = true,
+	["gmod_hands"] = true,
+	["gmod_gamerules"] = true,
+	["player_manager"] = true,
+	["worldspawn"] = true,
+	["soundent"] = true,
+	["ai_network"] = true,
+	["scene_manager"] = true,
+	["shadow_control"] = true,
+	["env_sun"] = true,
+	["bodyque"] = true,
+	["env_skypaint"] = true,
+	["light"] = true,
+	["path_corner"] = true,
+	["func_reflective_glass"] = true,
+	["env_soundscape"] = true,
+	["func_illusionary"] = true,
+	["func_vehicleclip"] = true,
+	["network"] = true,
+	["light_environment"] = true,
+	["env_fog_controller"] = true,
+	["func_breakable"] = true,
+	["env_explosion"] = true,
+	["class C_PlayerResource"] = true,
+	["class C_FuncAreaPortalWindow"] = true,
+	["viewmodel"] = true,
+	["class C_Sun"] = true,
+	["class C_GMODGameRulesProxy"] = true,
+	["class C_ShadowControl"] = true,
+	["class C_WaterLODControl"] = true,
+	["class C_EnvTonemapController"] = true,
+	["class C_SpotlightEnd"] = true,
+	["class C_FogController"] = true,
+	["manipulate_bone"] = true,
+	["viewmodel"] = true,
+	["viewmodel"] = true,
+	["viewmodel"] = true,
+	["viewmodel"] = true,
+	["viewmodel"] = true,
+}
+
+gebLib_StartsWithBlacklist = {
+	"class C",
+}
+
+gebLib_DamageExceptions = {
+    ["npc_monk"] = DMG_GENERIC,
+    ["npc_strider"] = DMG_GENERIC,
+    ["npc_alyx"] = DMG_GENERIC,
+    ["npc_barney"] = DMG_GENERIC,
+    ["npc_mossman"] = DMG_GENERIC,
+    ["npc_gman"] = DMG_GENERIC,
+	["npc_rollermine"] = DMG_BLAST,
+	["npc_antlionguard"] = DMG_GENERIC,
+	["npc_vortigaunt"] = DMG_GENERIC,
+	["VortigauntSlave"] = DMG_GENERIC,
+	["npc_combinegunship"] = DMG_GENERIC,
+	["npc_combinedropship"] = DMG_CRUSH,
+	["npc_helicopter"] = DMG_AIRBOAT
+}
+
 if CLIENT then
     gebLib__DebrisList = {} // table where we store existing debris
 end
 --------------------------
 local MPLY = FindMetaTable("Player")
 local MENT = FindMetaTable("Entity")
+local MWEP = FindMetaTable("Weapon")
 --------------------------
 local error             = error
 local Vector            = Vector
@@ -51,6 +147,14 @@ if SERVER then
 	util.AddNetworkString("gebLib.cl.utils.PauseAnim.Action")
 	util.AddNetworkString("gebLib.cl.utils.ResumeAnim")
 	util.AddNetworkString("gebLib.cl.utils.ResumeAnim.Action")
+end
+--------------------------
+/////////////////////////
+// WEAPON FUNCTIONS
+/////////////////////////
+--------------------------
+function MWEP:gebLib_IsCarried()
+	return self:GetOwner():IsValid()
 end
 --------------------------
 /////////////////////////
@@ -294,6 +398,22 @@ end
 // ENTITY FUNCTIONS
 /////////////////////////
 --------------------------
+function MENT:gebLib_IsUsableEntity()
+	local class = self:GetClass()
+
+	if gebLib_ClassBlacklist[class] then
+		return false
+	end
+
+	for _, blackListText in ipairs(gebLib_StartsWithBlacklist) do
+		if string.StartsWith(class, blackListText) then
+			return false
+		end
+	end
+
+	return true
+end
+
 function MENT:gebLib_IsPerson()
     return self:IsPlayer() or self:IsNPC() or self:IsNextBot()
 end
@@ -301,12 +421,18 @@ end
 local props = {
     ["prop_physics"] = true,
     ["prop_physics_multiplayer"] = true,
-    ["prop_dynamic"] = true,    
+    ["prop_dynamic"] = true,
+	["prop_ragdoll"] = true,
+	["prop_physics_clipped"] = true,
 }
 function MENT:gebLib_IsProp()
 	return props[self:GetClass()]
 end
-/////////////////////////
+
+function MENT:gebLib_IsItem()
+	return string.StartsWith(self:GetClass(), "item")
+end
+
 function MENT:gebLib_Alive()
     if not self:IsValid() then return false end
     if !self:gebLib_IsPerson() then return false end
