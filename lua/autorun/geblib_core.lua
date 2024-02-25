@@ -22,6 +22,7 @@ local modules = includes .. "modules/"
 local iderma = includes .. "derma/"
 --------------------------
 gebLib.ImportFile( modules .. "print.lua" )
+gebLib.ImportFile( includes .. "geblib_globals.lua" )
 gebLib.ImportFile( includes .. "geblib_enums.lua" )
 gebLib.ImportFile( includes .. "geblib_utilities.lua" )
 gebLib.ImportFile( includes .. "geblib_cache.lua" )
