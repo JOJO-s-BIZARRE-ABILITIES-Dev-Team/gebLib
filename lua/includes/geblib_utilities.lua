@@ -141,7 +141,7 @@ end
 function MPLY:gebLib_PlayAction(sequence, playback)
     playback = playback or 1
 
-	if not self:gebLib_PredictedOrDifferentPlayer() then return end
+	if not game.SinglePlayer() and not self:gebLib_PredictedOrDifferentPlayer() then return end
 
     if isstring(sequence) then
         sequence = self:LookupSequence(sequence)
@@ -155,7 +155,11 @@ function MPLY:gebLib_PlayAction(sequence, playback)
 			gebLib_net.WriteEntity(self)
             net.WriteUInt(sequence, 10)
             net.WriteFloat(playback)
-        gebLib_net.SendToAllExcept(self)
+		if game.SinglePlayer() then
+			net.Broadcast()
+		else
+			gebLib_net.SendToAllExcept(self)
+		end
     end
 end
 
@@ -167,7 +171,11 @@ function MPLY:gebLib_StopAnim(slot)
 		net.Start("gebLib.cl.utils.StopAnim")
 		gebLib_net.WriteEntity(self)
 		net.WriteUInt(slot, 3)
-		gebLib_net.SendToAllExcept(self)
+		if game.SinglePlayer() then
+			net.Broadcast()
+		else
+			gebLib_net.SendToAllExcept(self)
+		end
 	end
 end
 
@@ -181,7 +189,11 @@ function MPLY:gebLib_StopAction()
 
 		net.Start("gebLib.cl.utils.StopAnim.Action")
 		gebLib_net.WriteEntity(self)
-		gebLib_net.SendToAllExcept(self)
+		if game.SinglePlayer() then
+			net.Broadcast()
+		else
+			gebLib_net.SendToAllExcept(self)
+		end
 	end
 end
 
@@ -192,7 +204,11 @@ function MPLY:gebLib_PauseAnim(slot)
 		net.Start("gebLib.cl.utils.PauseAnim")
 		gebLib_net.WriteEntity(self)
 		net.WriteUInt(slot, 3)
-		gebLib_net.SendToAllExcept(self)
+		if game.SinglePlayer() then
+			net.Broadcast()
+		else
+			gebLib_net.SendToAllExcept(self)
+		end
 	end
 end
 
@@ -202,7 +218,11 @@ function MPLY:gebLib_PauseAction()
 	if SERVER then
 		net.Start("gebLib.cl.utils.PauseAnim.Action")
 		gebLib_net.WriteEntity(self)
-		gebLib_net.SendToAllExcept(self)
+		if game.SinglePlayer() then
+			net.Broadcast()
+		else
+			gebLib_net.SendToAllExcept(self)
+		end
 	end
 end
 
@@ -216,7 +236,11 @@ function MPLY:gebLib_ResumeAnim(slot, playback)
 		gebLib_net.WriteEntity(self)
 		net.WriteUInt(slot, 3)
 		net.WriteFloat(playback)
-		gebLib_net.SendToAllExcept(self)
+		if game.SinglePlayer() then
+			net.Broadcast()
+		else
+			gebLib_net.SendToAllExcept(self)
+		end
 	end
 end
 
@@ -229,7 +253,11 @@ function MPLY:gebLib_ResumeAction(playback)
 		net.Start("gebLib.cl.utils.ResumeAnim.Action")
 		gebLib_net.WriteEntity(self)
 		net.WriteFloat(playback)
-		gebLib_net.SendToAllExcept(self)
+		if game.SinglePlayer() then
+			net.Broadcast()
+		else
+			gebLib_net.SendToAllExcept(self)
+		end
 	end
 end
 
