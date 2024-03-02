@@ -31,6 +31,7 @@ gebLib.ImportFile( includes .. "geblib_animation.lua" )
 gebLib.ImportFile( includes .. "geblib_camera.lua" )
 gebLib.ImportFile( includes .. "geblib_statuseffect.lua" )
 gebLib.ImportFile( includes .. "geblib_powerlevels.lua" )
+gebLib.ImportFile( includes .. "gebLib_sound.lua" )
 --------------------------
 // INCLUDING DERMA
 --------------------------

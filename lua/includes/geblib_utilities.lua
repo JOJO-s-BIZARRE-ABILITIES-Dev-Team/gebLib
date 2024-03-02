@@ -525,6 +525,50 @@ function gebLib_utils.MatchFromTable(table, toMatch)
 	return false
 end
 /////////////////////////
+function gebLib_DrawCircle(x, y, radius, color, progress, angle)
+    local circle = {}
+    local percentage = progress/100
+    local x1, y1 = x + radius, y + radius
+    local seg = 100
+    if !angle then angle = 180 end
+    table.insert( circle, { x = x1, y = y1 } )
+    for i = 0, seg do
+        local a = math.rad( (( i / seg ) * (-360*percentage))+angle )
+        table.insert( circle, { x = x1 + math.sin( a ) * radius, y = y1 + math.cos( a ) * radius } )
+    end
+    table.insert( circle, { x = x1, y = y1 } )
+    draw.NoTexture()
+    surface.SetDrawColor( color )
+    surface.DrawPoly( circle )    
+end
+
+function gebLib_DrawCircularBar(x, y, progress, radius, thickness, angle,color)
+    render.SetStencilWriteMask( 0xFF )
+    render.SetStencilTestMask( 0xFF )
+    render.SetStencilReferenceValue( 0 )
+    render.SetStencilCompareFunction( STENCIL_ALWAYS )
+    render.SetStencilPassOperation( STENCIL_KEEP )
+    render.SetStencilFailOperation( STENCIL_KEEP )
+    render.SetStencilZFailOperation( STENCIL_KEEP )
+    render.ClearStencil()
+    render.SetStencilEnable( true )
+    render.SetStencilReferenceValue( 1 )
+    render.SetStencilCompareFunction( STENCIL_NEVER )
+    render.SetStencilFailOperation( STENCIL_REPLACE )
+    gebLib_DrawCircle(x-(radius-thickness), y-(radius-thickness), radius-thickness, color_white, 100)
+    render.SetStencilCompareFunction( STENCIL_GREATER )
+    render.SetStencilFailOperation( STENCIL_KEEP )
+    gebLib_DrawCircle(x-radius, y-radius, radius, color, progress, angle)
+    render.SetStencilEnable( false )
+end
+
+function gebLib_TextWithShadow(text, font, x, y, color, x_a, y_a, color_shadow)
+    color_shadow = color_shadow or color_black
+    draw.SimpleText(text, font, x+1.5 , y+1.5, color_shadow, x_a, y_a)
+    local w,h = draw.SimpleText(text, font, x, y, color, x_a, y_a)
+    return w,h
+end
+
 function gebLib_utils.TableEquals(tbl1, tbl2)
 	if tbl1 == tbl2 then
 		return true
