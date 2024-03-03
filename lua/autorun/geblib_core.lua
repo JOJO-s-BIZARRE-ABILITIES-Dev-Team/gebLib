@@ -21,7 +21,6 @@ local includes = "includes/"
 local modules = includes .. "modules/"
 local iderma = includes .. "derma/"
 --------------------------
-gebLib.ImportFile( modules .. "print.lua" )
 gebLib.ImportFile( includes .. "geblib_globals.lua" )
 gebLib.ImportFile( includes .. "geblib_enums.lua" )
 gebLib.ImportFile( includes .. "geblib_utilities.lua" )
@@ -32,11 +31,6 @@ gebLib.ImportFile( includes .. "geblib_camera.lua" )
 gebLib.ImportFile( includes .. "geblib_statuseffect.lua" )
 gebLib.ImportFile( includes .. "geblib_powerlevels.lua" )
 gebLib.ImportFile( includes .. "gebLib_sound.lua" )
---------------------------
-// INCLUDING DERMA
---------------------------
-gebLib.ImportFile( iderma .. "geblib_skilltree.lua", true )
-gebLib.ImportFile( iderma .. "geblib_skillnode.lua", true )
 --------------------------
 //
 --------------------------
