@@ -40,15 +40,15 @@ gebLib.ImportFile( iderma .. "geblib_skillnode.lua", true )
 //
 --------------------------
 // DEBUGGING
-CreateConVar( "geblib_developer_debugmode", 0, { FCVAR_CHEAT, FCVAR_REPLICATED, FCVAR_ARCHIVE, FCVAR_PROTECTED }, "[DEVELOPER] Debug Mode" )
-CreateConVar( "geblib_developer_debugnetwork", 0, { FCVAR_CHEAT, FCVAR_REPLICATED, FCVAR_ARCHIVE, FCVAR_PROTECTED }, "[DEVELOPER] Displays network debug messages" )
+CreateConVar( "geblib_developer_debugmode", 0, { FCVAR_REPLICATED, FCVAR_ARCHIVE, FCVAR_PROTECTED }, "[DEVELOPER] Debug Mode" )
+CreateConVar( "geblib_developer_debugnetwork", 0, { FCVAR_REPLICATED, FCVAR_ARCHIVE, FCVAR_PROTECTED }, "[DEVELOPER] Displays network debug messages" )
 
 function gebLib.DebugMode()
-	return GetConVar("geblib_developer_debugmode"):GetInt() == 1
+	return GetConVar("geblib_developer_debugmode"):GetBool()
 end
 
 function gebLib.NetworkDebug()
-	return GetConVar("geblib_developer_debugnetwork"):GetInt() == 1
+	return GetConVar("geblib_developer_debugnetwork"):GetBool()
 end
 --------------------------
 // 
@@ -72,7 +72,7 @@ if SERVER then
 end
 
 if CLIENT then
-    hook.Add( "InitPostEntity", "gebLib_InitialConnect", function()
+    hook.Add("InitPostEntity", "gebLib_InitialConnect", function()
         hook.Run("gebLib_PlayerFullyConnected", LocalPlayer())
     end)
 end
