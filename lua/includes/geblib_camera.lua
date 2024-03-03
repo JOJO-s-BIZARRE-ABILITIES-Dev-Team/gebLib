@@ -78,8 +78,6 @@ function gebLib_Camera:Play(simulate)
 
 		self.MaxFrames = largestEventFrame
 	end
-	
-	print(self.MaxFrames)
 
 	if SERVER then
 		hook.Add("Think", self.ThinkName, function()
