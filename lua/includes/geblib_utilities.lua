@@ -338,11 +338,11 @@ function MENT:gebLib_IsUsableEntity()
 		return false
 	end
 
-	for _, blackListText in ipairs(gebLib_StartsWithBlacklist) do
-		if string.StartsWith(class, blackListText) then
-			return false
-		end
-	end
+	-- for _, blackListText in ipairs(gebLib_StartsWithBlacklist) do
+	-- 	if string.StartsWith(class, blackListText) then
+	-- 		return false
+	-- 	end
+	-- end
 
 	return true
 end

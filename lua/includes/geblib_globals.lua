@@ -66,11 +66,14 @@ gebLib_ClassBlacklist = {
 	["class C_SpotlightEnd"] = true,
 	["class C_FogController"] = true,
 	["manipulate_bone"] = true,
-	["viewmodel"] = true,
-	["viewmodel"] = true,
-	["viewmodel"] = true,
-	["viewmodel"] = true,
-	["viewmodel"] = true,
+	["color_correction_volume"] = true,
+	["trigger_multiple"] = true,
+	["keyframe_rope"] = true,
+	["info_particle_system"] = true,
+	["env_wind"] = true,
+	["class CLuaEffect"] = true,
+	["class C_BaseFlex"] = true,
+	["explosion_ent"] = true,
 }
 
 gebLib_StartsWithBlacklist = {
