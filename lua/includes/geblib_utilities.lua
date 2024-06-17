@@ -129,7 +129,7 @@ function MPLY:gebLib_PlaySequence( slot, sequence, cycle, autokill )
 
     if SERVER then
         netStart( "gebLib.cl.utils.PlayAnim" )
-			gebLib_net.WriteEntity(self)
+			net.WritePlayer(self)
             netWriteUInt( slot, 3 )
             netWriteUInt( sequence, 16 )
             netWriteFloat( cycle )
@@ -152,7 +152,7 @@ function MPLY:gebLib_PlayAction(sequence, playback)
 
     if SERVER then
         net.Start("gebLib.cl.utils.PlayAnim.Action")
-			gebLib_net.WriteEntity(self)
+			net.WritePlayer(self)
             net.WriteUInt(sequence, 10)
             net.WriteFloat(playback)
 		if game.SinglePlayer() then
@@ -169,7 +169,7 @@ function MPLY:gebLib_StopAnim(slot)
 
 	if SERVER then
 		net.Start("gebLib.cl.utils.StopAnim")
-		gebLib_net.WriteEntity(self)
+		net.WritePlayer(self)
 		net.WriteUInt(slot, 3)
 		if game.SinglePlayer() then
 			net.Broadcast()
@@ -188,7 +188,7 @@ function MPLY:gebLib_StopAction()
 		self:SetLayerLooping(1, false)
 
 		net.Start("gebLib.cl.utils.StopAnim.Action")
-		gebLib_net.WriteEntity(self)
+		net.WritePlayer(self)
 		if game.SinglePlayer() then
 			net.Broadcast()
 		else
@@ -202,7 +202,7 @@ function MPLY:gebLib_PauseAnim(slot)
 
 	if SERVER then
 		net.Start("gebLib.cl.utils.PauseAnim")
-		gebLib_net.WriteEntity(self)
+		net.WritePlayer(self)
 		net.WriteUInt(slot, 3)
 		if game.SinglePlayer() then
 			net.Broadcast()
@@ -217,7 +217,7 @@ function MPLY:gebLib_PauseAction()
 
 	if SERVER then
 		net.Start("gebLib.cl.utils.PauseAnim.Action")
-		gebLib_net.WriteEntity(self)
+		net.WritePlayer(self)
 		if game.SinglePlayer() then
 			net.Broadcast()
 		else
@@ -233,7 +233,7 @@ function MPLY:gebLib_ResumeAnim(slot, playback)
 
 	if SERVER then
 		net.Start("gebLib.cl.utils.ResumeAnim")
-		gebLib_net.WriteEntity(self)
+		net.WritePlayer(self)
 		net.WriteUInt(slot, 3)
 		net.WriteFloat(playback)
 		if game.SinglePlayer() then
@@ -251,7 +251,7 @@ function MPLY:gebLib_ResumeAction(playback)
 
 	if SERVER then
 		net.Start("gebLib.cl.utils.ResumeAnim.Action")
-		gebLib_net.WriteEntity(self)
+		net.WritePlayer(self)
 		net.WriteFloat(playback)
 		if game.SinglePlayer() then
 			net.Broadcast()
@@ -263,64 +263,71 @@ end
 
 if CLIENT then
     netReceive("gebLib.cl.utils.PlayAnim", function() 
-        local ply = gebLib_net.ReadEntity()
+        local ply = net.ReadPlayer()
         
         local slot = netReadUInt( 3 )
         local anim = netReadUInt( 10 )
         local cycle = netReadFloat()
         local autokill = netReadBool()
-
+		if !IsValid( ply ) then return end
+	
 		ply:gebLib_PlaySequence(slot, anim, cycle, autokill)
     end)
 
     netReceive("gebLib.cl.utils.PlayAnim.Action", function() 
-        local ply = gebLib_net.ReadEntity()
+        local ply = net.ReadPlayer()
         
         local anim = netReadUInt(10)
         local playback = netReadFloat()
+	if !IsValid( ply ) then return end
 
 		ply:gebLib_PlayAction(anim, playback)
     end)
 
 	netReceive("gebLib.cl.utils.StopAnim", function() 
-        local ply = gebLib_net.ReadEntity()
+        local ply = net.ReadPlayer()
         
         local slot = netReadUInt(3)
+	if !IsValid( ply ) then return end
 
 		ply:gebLib_StopAnim(slot)
     end)
 
 	netReceive("gebLib.cl.utils.StopAnim.Action", function() 
-        local ply = gebLib_net.ReadEntity()
+        local ply = net.ReadPlayer()
+	if !IsValid( ply ) then return end
 		ply:gebLib_StopAction()
     end)
 
 	netReceive("gebLib.cl.utils.PauseAnim", function() 
-        local ply = gebLib_net.ReadEntity()
+        local ply = net.ReadPlayer()
         
         local slot = netReadUInt(3)
-
+	if !IsValid( ply ) then return end
 		ply:gebLib_PauseAnim(slot)
     end)
 
 	netReceive("gebLib.cl.utils.PauseAnim.Action", function() 
-        local ply = gebLib_net.ReadEntity()
+        local ply = net.ReadPlayer()
+		if !IsValid( ply ) then return end
 		ply:gebLib_PauseAction()
     end)
 
 	netReceive("gebLib.cl.utils.ResumeAnim", function() 
-        local ply = gebLib_net.ReadEntity()
+        local ply = net.ReadPlayer()
         
         local slot = netReadUInt(3)
 		local playback = net.ReadFloat()
+		if !IsValid( ply ) then return end
 
 		ply:gebLib_ResumeAnim(slot, playback)
     end)
 
 	netReceive("gebLib.cl.utils.ResumeAnim.Action", function() 
-        local ply = gebLib_net.ReadEntity()
+        local ply = net.ReadPlayer()
 
 		local playback = net.ReadFloat()
+		if !IsValid( ply ) then return end
 
 		ply:gebLib_ResumeAction(playback)
     end)
