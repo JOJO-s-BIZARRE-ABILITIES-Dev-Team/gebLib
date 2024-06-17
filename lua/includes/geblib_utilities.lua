@@ -269,6 +269,7 @@ if CLIENT then
         local anim = netReadUInt( 10 )
         local cycle = netReadFloat()
         local autokill = netReadBool()
+        
 		if !IsValid( ply ) then return end
 	
 		ply:gebLib_PlaySequence(slot, anim, cycle, autokill)
@@ -279,7 +280,8 @@ if CLIENT then
         
         local anim = netReadUInt(10)
         local playback = netReadFloat()
-	if !IsValid( ply ) then return end
+
+	    if !IsValid( ply ) then return end
 
 		ply:gebLib_PlayAction(anim, playback)
     end)
@@ -288,14 +290,17 @@ if CLIENT then
         local ply = net.ReadPlayer()
         
         local slot = netReadUInt(3)
-	if !IsValid( ply ) then return end
+
+	    if !IsValid( ply ) then return end
 
 		ply:gebLib_StopAnim(slot)
     end)
 
 	netReceive("gebLib.cl.utils.StopAnim.Action", function() 
         local ply = net.ReadPlayer()
-	if !IsValid( ply ) then return end
+
+	    if !IsValid( ply ) then return end
+
 		ply:gebLib_StopAction()
     end)
 
@@ -303,13 +308,17 @@ if CLIENT then
         local ply = net.ReadPlayer()
         
         local slot = netReadUInt(3)
-	if !IsValid( ply ) then return end
+
+	    if !IsValid( ply ) then return end
+
 		ply:gebLib_PauseAnim(slot)
     end)
 
 	netReceive("gebLib.cl.utils.PauseAnim.Action", function() 
         local ply = net.ReadPlayer()
+
 		if !IsValid( ply ) then return end
+
 		ply:gebLib_PauseAction()
     end)
 
@@ -318,6 +327,7 @@ if CLIENT then
         
         local slot = netReadUInt(3)
 		local playback = net.ReadFloat()
+
 		if !IsValid( ply ) then return end
 
 		ply:gebLib_ResumeAnim(slot, playback)
@@ -327,6 +337,7 @@ if CLIENT then
         local ply = net.ReadPlayer()
 
 		local playback = net.ReadFloat()
+
 		if !IsValid( ply ) then return end
 
 		ply:gebLib_ResumeAction(playback)
