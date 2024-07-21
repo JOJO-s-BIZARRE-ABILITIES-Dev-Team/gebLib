@@ -81,12 +81,12 @@ gebLib_StartsWithBlacklist = {
 }
 
 gebLib_DamageExceptions = {
-    ["npc_monk"] = DMG_GENERIC,
-    ["npc_strider"] = DMG_GENERIC,
-    ["npc_alyx"] = DMG_GENERIC,
-    ["npc_barney"] = DMG_GENERIC,
-    ["npc_mossman"] = DMG_GENERIC,
-    ["npc_gman"] = DMG_GENERIC,
+	["npc_monk"] = DMG_GENERIC,
+	["npc_strider"] = DMG_GENERIC,
+	["npc_alyx"] = DMG_GENERIC,
+	["npc_barney"] = DMG_GENERIC,
+	["npc_mossman"] = DMG_GENERIC,
+	["npc_gman"] = DMG_GENERIC,
 	["npc_rollermine"] = DMG_BLAST,
 	["npc_antlionguard"] = DMG_GENERIC,
 	["npc_vortigaunt"] = DMG_GENERIC,

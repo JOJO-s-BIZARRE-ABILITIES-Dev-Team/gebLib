@@ -1,0 +1,42 @@
+{
+	"Lua.workspace.library": [
+		"C:/Users/Administrator/AppData/Roaming/Code/User/globalStorage/sumneko.lua/addonManager/addons/garrysmod/module/library"
+	],
+	"Lua.runtime.version": "LuaJIT",
+	"Lua.runtime.special": {
+		"include": "dofile",
+		"IncludeCS": "dofile"
+	},
+	"Lua.runtime.nonstandardSymbol": [
+		"continue",
+		"!",
+		"//",
+		"!="
+	],
+	"Lua.diagnostics.disable": [
+		"duplicate-set-field"
+	],
+	"Lua.diagnostics.neededFileStatus": {
+		"codestyle-check": "Any",
+	},
+	"Lua.workspace.checkThirdParty": false,
+	// Checks for typos in code
+	"Lua.spell.dict": [
+		"en_US" 
+	],
+	"Lua.format.enable": true,
+	"Lua.codeLens.enable": true,
+	"Lua.format.defaultConfig": {
+		"indent_style": "tab",
+		"indent_size": "4",
+		"tab_width": "4",
+		"max_line_length": "120",
+		"quote_style": "double",
+		"end_of_line": "auto",
+		"end_statement_with_semicolon": "never"
+	},
+	"[lua]": {
+        "editor.defaultFormatter": "sumneko.lua", // Sets the default formatter for Lua files
+        "editor.formatOnSave": true, // Enables auto-formatting on save
+    }
+}

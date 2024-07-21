@@ -30,27 +30,27 @@ local sprint = debug and print or function() end
 local soundCache = {}
 
 local MP3Data = {
-	versions = {"2.5", "x", "2", "1"},
-	layers = {"x", "3", "2", "1"},
+	versions = { "2.5", "x", "2", "1" },
+	layers = { "x", "3", "2", "1" },
 	bitrates = {
-		["V1Lx"] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		["V1L1"] = {0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448},
-		["V1L2"] = {0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384},
-		["V1L3"] = {0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320},
-		["V2Lx"] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		["V2L1"] = {0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256, 288},
-		["V2L2"] = {0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160},
-		["V2L3"] = {0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160},
-		["VxLx"] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		["VxL1"] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		["VxL2"] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		["VxL3"] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		["V1Lx"] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+		["V1L1"] = { 0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448 },
+		["V1L2"] = { 0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384 },
+		["V1L3"] = { 0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320 },
+		["V2Lx"] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+		["V2L1"] = { 0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256, 288 },
+		["V2L2"] = { 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160 },
+		["V2L3"] = { 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160 },
+		["VxLx"] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+		["VxL1"] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+		["VxL2"] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+		["VxL3"] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
 	},
 	sampleRates = {
-		["x"] = {0, 0, 0},
-		["1"] = {44100, 48000, 32000},
-		["2"] = {22050, 24000, 16000},
-		["2.5"] = {11025, 12000, 8000}
+		["x"] = { 0, 0, 0 },
+		["1"] = { 44100, 48000, 32000 },
+		["2"] = { 22050, 24000, 16000 },
+		["2.5"] = { 11025, 12000, 8000 }
 	},
 	samples = {
 		x = {
@@ -143,7 +143,9 @@ local soundDecoders = {
 
 			-- Calculate total ID3v2 size
 			local z0, z1, z2, z3 = buffer:ReadByte(), buffer:ReadByte(), buffer:ReadByte(), buffer:ReadByte()
-			local ID3Size = 10 + ((bit.band(z0, 0x7f) * 2097152) + (bit.band(z1, 0x7f) * 16384) + (bit.band(z2, 0x7f) * 128) + bit.band(z3, 0x7f)) + footerSize
+			local ID3Size = 10 +
+				((bit.band(z0, 0x7f) * 2097152) + (bit.band(z1, 0x7f) * 16384) + (bit.band(z2, 0x7f) * 128) + bit.band(z3, 0x7f)) +
+				footerSize
 			sprint("Total ID3v2 size: ", ID3Size, " bytes")
 
 			-- Skip the total ID3v2 size - 10 since we already seeked past the first 10 bytes, which is the header
@@ -176,9 +178,9 @@ local soundDecoders = {
 				else
 					buffer:Skip(1)
 				end
-			-- Skip ID3v1 metadata
+				-- Skip ID3v1 metadata
 			elseif b1 == 0x54 and b2 == 0x41 and b3 == 0x47 then -- "TAG"
-				if b4 == 0x2b then -- "+"
+				if b4 == 0x2b then                      -- "+"
 					sprint("Skipping ID3v1+ metadata")
 					buffer:Skip(227 - 4)
 				else
@@ -218,9 +220,9 @@ function gebLib_SoundDuration(soundPath)
 	if soundCache[soundPath] ~= nil then
 		return soundCache[soundPath]
 	end
-	
+
 	local extension = soundPath:GetExtensionFromFilename()
-	
+
 	if extension and soundDecoders[extension] then
 		local buffer = file.Open(soundPath, "r", "GAME")
 		local result = soundDecoders[extension](buffer)
