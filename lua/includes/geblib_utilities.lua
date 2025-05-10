@@ -636,60 +636,85 @@ end
 // Debris
 /////////////////////////
 if CLIENT then
-    function gebLib_utils.CreateDebris( modelPath, isProp, lifeTime )
-        local debris
-        if isProp then
-            debris = ents.CreateClientProp( modelPath )
-        else
-            debris = ClientsideModel( modelPath )
-        end
-        //
-        local index = table.insert( gebLib__DebrisList, debris )
-        local finalLifeTime = lifeTime or 10
 
-        debris.TableIndex   = index
-        debris.LifeTime     = CurTime() + finalLifeTime
-        debris.DoAnimation  = true
-
-        local hookNameThink = "gebLib.Debris.Think."  .. tostring( index )
-
-        hook.Add( "Think", hookNameThink, function( )
-            if !IsValid( debris ) then hook.Remove( "Think", hookNameThink ) return end
-
-            if CurTime() > debris.LifeTime then
-                gebLib_utils.RemoveDebris( debris )
-            end
-
-            if debris.DoAnimation and debris:GetModelScale() then
-                if !debris.DesiredModelScale then 
-                    debris.DesiredModelScale = debris:GetModelScale()
-                    debris:SetModelScale( 0, 0 )
-                end
-				
-                debris:SetModelScale( Lerp( math.ease.InOutSine( FrameTime() * 24 ), debris:GetModelScale(), debris.DesiredModelScale ) )
-            end
-        end)
-
-        debris.RenderOverride = function( self )
-            if LocalPlayer():GetPos():Distance( self:GetPos() ) >= 5000 then return end
-
-            local blend = 1
-            if CurTime() > self.LifeTime - 1 then
-                blend = Lerp( math.abs( self.LifeTime - CurTime() - 1 ) / 1, 1, 0 )
-            end
-            render.SetBlend( blend )
-            self:DrawModel()
-            render.SetBlend( 1 )
-        end
-        //
-        return debris
+function gebLib_utils.CreateDebris( modelPath, isProp, lifeTime )
+    local debris
+    if isProp then
+        debris = ents.CreateClientProp( modelPath )
+    else
+        debris = ClientsideModel( modelPath )
     end
 
-    function gebLib_utils.RemoveDebris( debris )
-        gebLib__DebrisList[ debris.TableIndex ] = nil
+    local index = table.insert( gebLib__DebrisList, debris )
+    local finalLifeTime = lifeTime or 10
 
-        debris:Remove()
+    debris.TableIndex   = index
+    debris.LifeTime     = CurTime() + finalLifeTime
+    debris.DoAnimation  = debris.DoAnimation or true
+
+    local hookNameThink = "gebLib.Debris.Think."  .. tostring( index )
+
+    hook.Add( "Think", hookNameThink, function( )
+        if !IsValid( debris ) then hook.Remove( "Think", hookNameThink ) return end
+
+        if CurTime() > debris.LifeTime then
+            gebLib_utils.RemoveDebris( debris )
+        end
+
+        if debris.DoAnimation and debris:GetModelScale() then
+            if !debris.DesiredModelScale then 
+                debris.DesiredModelScale = debris:GetModelScale()
+                debris:SetModelScale( 0, 0 )
+            end
+            
+            debris:SetModelScale( Lerp( math.ease.InOutSine( FrameTime() * 24 ), debris:GetModelScale(), debris.DesiredModelScale ) )
+        end
+    end)
+
+    debris.RenderOverride = function( self )
+        if EyePos():Distance( self:GetPos() ) >= 5000 then return end
+
+        local blend = 1
+        if CurTime() > self.LifeTime - 1 then
+            blend = Lerp( math.abs( self.LifeTime - CurTime() - 1 ) / 1, 1, 0 )
+        end
+        render.SetBlend( blend )
+        self:DrawModel()
+        render.SetBlend( 1 )
     end
+
+    return debris
+end
+
+function gebLib_utils.RemoveDebris( debris )
+    gebLib__DebrisList[ debris.TableIndex ] = nil
+
+    debris:Remove()
+end
+
+end
+
+/////////////////////////
+// Decal
+/////////////////////////
+if CLIENT then
+
+-- decal:DoAnimation(bool, speed) to make decal appear smooth     
+
+function gebLib_utils.CreateDecal(path, pos, angle, size, lifetime)
+    local decal = ents.CreateClientside("geblib_decal")
+    if IsValid(decal) then
+        decal:SetPos(pos or vector_origin)
+        decal:SetAngles(angle or angle_zero)
+        decal:SetDecalSize(size or 32)
+        decal:SetLifeTime(CurTime() + (lifetime or 3))
+        decal:SetDecal(path)
+
+        decal:Spawn()
+    end
+    return decal
+end
+
 end
 
 local pow = math.pow

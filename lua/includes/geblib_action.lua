@@ -28,6 +28,9 @@ function Action.Create( entity, duration )
     self.ActionIndex        = table.insert( Action.ActionList, self )
     self.LifeTime           = 0
 
+    self.StartTime = 0
+    self.RepeatedFor = 0
+
     return self
 end
 
@@ -36,32 +39,33 @@ function Action:SetupThinking()
     local thinkName = "gebLib.Action.Think_" .. self:GetIndex()
     self.ThinkName = thinkName
     //
-    local startTime = CurTime() + self.StartDelay
-    local repeatedFor = 0
+    self.StartTime = CurTime() + self.StartDelay
+    self.RepeatedFor = 0
     hook.Add("Think", thinkName, function()
+        if !self then return end
         if !IsValid( self.Entity ) then return end
         if !self.Playing then self:Stop() return end // Remove if parent is invalid
 
         for k, EventInfo in pairs( self.Events ) do
             if EventInfo.Played then continue end
-            if CurTime() > startTime + ( EventInfo.Timestamp / self.Timescale ) then
+            if CurTime() > self.StartTime + ( EventInfo.Timestamp / self.Timescale ) then
                 EventInfo.Function( self )
                 EventInfo.Played = true
             end
         end
 
         // Kill action when time comes
-        if CurTime() > ( startTime + ( self.Duration / self.Timescale ) ) then
+        if CurTime() > ( self.StartTime + ( self.Duration / self.Timescale ) ) then
             if ( self.Repetitions == -1 ) then // Infinite loop
-                startTime = CurTime() 
-                repeatedFor = repeatedFor + 1
+                self.StartTime = CurTime() 
+                self.RepeatedFor = self.RepeatedFor + 1
                 self:ReloadEvents()
                 return 
             end
 
-            if repeatedFor < self.Repetitions then // Handle repetitions
-                startTime = CurTime() 
-                repeatedFor = repeatedFor + 1
+            if self.RepeatedFor < self.Repetitions then // Handle repetitions
+                self.StartTime = CurTime() 
+                self.RepeatedFor = self.RepeatedFor + 1
                 self:ReloadEvents() // Reload all events so they can be played again
             else
                 self:Stop()
