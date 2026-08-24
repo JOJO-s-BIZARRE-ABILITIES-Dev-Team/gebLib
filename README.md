@@ -298,6 +298,11 @@ local emitted = gebLib.Visuals.CreateDebrisBurst("effects/fleck_cement1", positi
     speed = 350,
     collide = false,
 })
+local impactDebris = gebLib.Visuals.CreateImpactDebris(trace.HitPos, trace.HitNormal, 250, {
+    material = trace.MatType,
+    count = 1200,
+    direction = shotDirection,
+})
 local decal = gebLib.Visuals.CreateDecal("decals/scorch1", position, angles, 32, 3)
 
 gebLib.Drawing.Circle(x, y, radius, color, progress)
@@ -311,7 +316,9 @@ Debris is client-only and capped at 512 active entities by default. Creating ano
 
 `CreateDebris` uses one shared event scheduler instead of a per-frame scan. Full-opacity debris stays on the engine draw path, then enters Lua only for its final one-second fade. Render-only `ClientsideModel` debris grows through engine interpolation. Physical client props skip animated scaling to avoid client trace errors.
 
-Use `CreateDebrisBurst` for hundreds or thousands of cosmetic fragments. It creates one engine particle emitter instead of one entity per fragment and returns the number emitted. It accepts a material rather than a model. World collision is enabled by default; pass `collide = false` for the highest throughput. Optional settings are `lifetime`, `size`, `endSize`, `speed`, `spin`, `velocity`, `gravity`, `bounce`, `color`, `collide`, and `lighting`.
+Use `CreateDebrisBurst` for hundreds or thousands of cosmetic fragments. It creates one engine particle emitter instead of one entity per fragment and returns the number emitted. It accepts a material rather than a model. World collision is enabled by default; pass `collide = false` for the highest throughput. Optional settings are `lifetime`, `size`, `endSize`, `speed`, `spin`, `velocity`, `direction`, `spread`, `gravity`, `bounce`, `color`, `collide`, and `lighting`.
+
+`CreateImpactDebris` creates a complete surface-aware impact. It keeps geometry bounded to at most 16 static low-poly chunks and 12 physical chunks, then renders the remaining count as cheap non-colliding particles. Surface materials are sampled once and cached, so models use the engine draw path without per-frame material overrides. Options include `count`, `material`, `direction`, `craters`, `props`, `particles`, `smoke`, `smokeCount`, `surface`, `modelScale`, `lifetime`, `propLifetime`, and `shadows`.
 
 ```lua
 print(gebLib.Visuals.GetDebrisCount())

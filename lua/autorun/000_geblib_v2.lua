@@ -4,6 +4,9 @@ gebLib = gebLib or {}
 gebLib.Version = "2.0.0"
 gebLib.Loaded = false
 
+if game and game.AddParticles then game.AddParticles("particles/geblib_debris.pcf") end
+if SERVER and PrecacheParticleSystem then PrecacheParticleSystem("geblib_debris_smoke") end
+
 CreateConVar(
     "geblib_developer_debugmode",
     "0",
