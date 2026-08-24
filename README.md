@@ -336,7 +336,15 @@ geblib_debris_profile_reset
 geblib_debris_profile_report
 ```
 
-The report separates impact construction, placement queries, model and prop creation, physics setup, particles, smoke, active and sleeping physics objects, frame hitches, 1% low FPS, and FPS ranges by active debris count.
+The report separates impact construction, placement queries, model and prop creation, transform and material work, collision setup, physics setup, particles, smoke, active and sleeping physics objects, frame hitches, 1% low FPS, and FPS ranges by active debris count. Pauses longer than 250 ms are reported separately and excluded from FPS calculations.
+
+Use the debug-only initialization comparison when two gameplay runs cannot be identical:
+
+```text
+geblib_debris_profile_compare_init 1
+```
+
+It resets the profile and alternates legacy and optimized prop initialization inside the same impacts. The report compares normalized time per prop and physics readiness for both cohorts. Run the command with `0` to return to the fully optimized path.
 
 `gebLib_ChatAddText` accepts up to 32 string or color arguments. Each string is limited to 1024 bytes.
 

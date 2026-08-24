@@ -5,6 +5,7 @@ local DEBRIS_TIMER = "gebLib.Visuals.Debris"
 local DEBRIS_PROFILE_HOOK = "gebLib.Visuals.DebrisProfile"
 local DEBRIS_PROFILE_CALLBACK = "gebLib.Visuals.DebrisProfile"
 local profileClock = SysTime or os.clock
+local MAX_PROFILE_FRAME_TIME = 0.25
 local GROW_TIME = 0.25
 local DEFAULT_DEBRIS_GRAVITY = Vector(0, 0, -600)
 local MAX_IMPACT_MODELS = 16
@@ -100,13 +101,25 @@ local function newDebrisProfile()
             hullTraces = 0,
             lineTraces = 0,
             pointChecks = 0,
+            hullRejected = 0,
+            placementRejected = 0,
             modelCreateTime = 0,
             modelSetupTime = 0,
             propCreateTime = 0,
             propSetupTime = 0,
+            propTransformTime = 0,
+            propCollisionTime = 0,
+            propSpawnTime = 0,
+            propActivateTime = 0,
             physicsTime = 0,
             particleTime = 0,
             smokeTime = 0,
+            abLegacyProps = 0,
+            abLegacyTime = 0,
+            abLegacyPhysics = 0,
+            abOptimizedProps = 0,
+            abOptimizedTime = 0,
+            abOptimizedPhysics = 0,
         },
         creations = {
             models = 0,
@@ -130,6 +143,9 @@ local function newDebrisProfile()
             maxTime = 0,
             over33ms = 0,
             over50ms = 0,
+            excludedPauses = 0,
+            excludedPauseTime = 0,
+            longestPause = 0,
             histogram = {},
             buckets = {},
         },
@@ -138,6 +154,8 @@ end
 
 local debrisProfile = newDebrisProfile()
 local profileActive = false
+local compareInitialization = false
+local compareLegacyNext = true
 local lastProfileFrameAt
 Visuals.DebrisProfile = debrisProfile
 
@@ -180,6 +198,13 @@ local function sampleDebrisFrame()
     if elapsed <= 0 then return end
 
     local frames = debrisProfile.frames
+    if elapsed > MAX_PROFILE_FRAME_TIME then
+        frames.excludedPauses = frames.excludedPauses + 1
+        frames.excludedPauseTime = frames.excludedPauseTime + elapsed
+        frames.longestPause = math.max(frames.longestPause, elapsed)
+        return
+    end
+
     frames.count = frames.count + 1
     frames.totalTime = frames.totalTime + elapsed
     frames.minTime = math.min(frames.minTime, elapsed)
@@ -211,6 +236,8 @@ local function setDebrisProfileActive(active)
         if hook and hook.Add then hook.Add("Think", DEBRIS_PROFILE_HOOK, sampleDebrisFrame) end
         gebLib.PrintDebug("debris profiler enabled")
     else
+        compareInitialization = false
+        compareLegacyNext = true
         if hook and hook.Remove then hook.Remove("Think", DEBRIS_PROFILE_HOOK) end
     end
 end
@@ -676,73 +703,97 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
                 if options.flags == 2 then currentPosition = position end
                 local faceDirection = (idealPosition - (currentPosition - normal * 15)):GetNormalized()
                 local modelPosition = currentPosition - normal + randomDirection * (strength * 0.25) * math.Rand(0.5, 2)
-                local modelCreateStartedAt = profiling and profileClock()
-                local entity = Visuals.CreateDebris(models[math.random(1, #models)], false, staticLifetime, preserveCount)
-                if profiling then recordDuration(impactStats, "modelCreateTime", modelCreateStartedAt) end
+                local modelPath = models[math.random(1, #models)]
+                local scale = math.Rand(3, strength / 100) * modelScale
+                local keep = true
 
-                if IsValid(entity) then
-                    local modelSetupStartedAt = profiling and profileClock()
-                    configureImpactModel(entity, modelPosition, faceDirection:Angle(), math.Rand(3, strength / 100) * modelScale, surfaceMaterial, shadows)
-                    entity:Spawn()
-                    entity:Activate()
-                    if profiling then recordDuration(impactStats, "modelSetupTime", modelSetupStartedAt) end
+                if validatePlacement then
+                    impactModelTraceData.start = modelPosition + normal * 15
+                    impactModelTraceData.endpos = modelPosition - normal * 15
+                    if profiling then
+                        local placementStartedAt = profileClock()
+                        util.TraceLine(impactModelTraceData)
+                        recordDuration(impactStats, "placementTime", placementStartedAt)
+                        impactStats.lineTraces = impactStats.lineTraces + 1
+                    else
+                        util.TraceLine(impactModelTraceData)
+                    end
+                    keep = impactModelTrace.Hit
 
-                    local keep = true
-                    if validatePlacement then
-                        impactModelTraceData.start = modelPosition + normal * 15
-                        impactModelTraceData.endpos = modelPosition - normal * 15
+                    for check = 1, 3 do
+                        if not keep then break end
+                        local contents
                         if profiling then
                             local placementStartedAt = profileClock()
-                            util.TraceLine(impactModelTraceData)
+                            contents = util.PointContents(modelPosition - normal)
                             recordDuration(impactStats, "placementTime", placementStartedAt)
-                            impactStats.lineTraces = impactStats.lineTraces + 1
+                            impactStats.pointChecks = impactStats.pointChecks + 1
                         else
-                            util.TraceLine(impactModelTraceData)
+                            contents = util.PointContents(modelPosition - normal)
                         end
-                        keep = impactModelTrace.Hit
-
-                        for check = 1, 3 do
-                            if not keep then break end
-                            local contents
-                            if profiling then
-                                local placementStartedAt = profileClock()
-                                contents = util.PointContents(entity:GetPos() - normal)
-                                recordDuration(impactStats, "placementTime", placementStartedAt)
-                                impactStats.pointChecks = impactStats.pointChecks + 1
-                            else
-                                contents = util.PointContents(entity:GetPos() - normal)
-                            end
-                            if bit.band(contents, CONTENTS_SOLID) == CONTENTS_SOLID then
-                                entity:SetPos(entity:GetPos() + normal)
-                                if check == 3 then keep = false end
-                            else
-                                break
-                            end
+                        if bit.band(contents, CONTENTS_SOLID) == CONTENTS_SOLID then
+                            modelPosition = modelPosition + normal
+                            if check == 3 then keep = false end
+                        else
+                            break
                         end
-                    end
-
-                    if keep then
-                        spawned = spawned + 1
-                    else
-                        Visuals.RemoveDebris(entity)
                     end
                 end
+
+                if keep then
+                    local modelCreateStartedAt = profiling and profileClock()
+                    local entity = Visuals.CreateDebris(modelPath, false, staticLifetime, preserveCount)
+                    if profiling then recordDuration(impactStats, "modelCreateTime", modelCreateStartedAt) end
+
+                    if IsValid(entity) then
+                        local modelSetupStartedAt = profiling and profileClock()
+                        configureImpactModel(entity, modelPosition, faceDirection:Angle(), scale, surfaceMaterial, shadows)
+                        if profiling then recordDuration(impactStats, "modelSetupTime", modelSetupStartedAt) end
+                        spawned = spawned + 1
+                    end
+                elseif profiling then
+                    impactStats.placementRejected = impactStats.placementRejected + 1
+                end
+            elseif profiling then
+                impactStats.hullRejected = impactStats.hullRejected + 1
             end
         end
 
         if index <= propCount then
             local propPosition = options.propAtOrigin and position or currentPosition
             local propAngle = (propPosition - normal * 70 + sourceDirection):GetNormalized():Angle()
+            local comparing = profiling and compareInitialization
+            local legacyInitialization = false
+            if comparing then
+                legacyInitialization = compareLegacyNext
+                compareLegacyNext = not compareLegacyNext
+            end
+            local comparisonStartedAt = comparing and profileClock()
             local propCreateStartedAt = profiling and profileClock()
             local entity = Visuals.CreateDebris(models[math.random(1, #models)], true, propLifetime, preserveCount)
             if profiling then recordDuration(impactStats, "propCreateTime", propCreateStartedAt) end
 
             if IsValid(entity) then
                 local propSetupStartedAt = profiling and profileClock()
+                local transformStartedAt = profiling and profileClock()
                 configureImpactModel(entity, propPosition + normal * 24, propAngle, propScale, surfaceMaterial, shadows)
+                if profiling then recordDuration(impactStats, "propTransformTime", transformStartedAt) end
+
+                local collisionStartedAt = profiling and profileClock()
                 entity:SetCollisionGroup(3)
-                entity:Spawn()
-                entity:Activate()
+                if profiling then recordDuration(impactStats, "propCollisionTime", collisionStartedAt) end
+
+                if legacyInitialization then
+                    local spawnStartedAt = profileClock()
+                    entity:Spawn()
+                    recordDuration(impactStats, "propSpawnTime", spawnStartedAt)
+                end
+
+                if legacyInitialization or propScale then
+                    local activateStartedAt = profileClock()
+                    entity:Activate()
+                    if profiling then recordDuration(impactStats, "propActivateTime", activateStartedAt) end
+                end
                 if profiling then recordDuration(impactStats, "propSetupTime", propSetupStartedAt) end
 
                 local physicsStartedAt = profiling and profileClock()
@@ -752,6 +803,19 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
                     physics:SetMaterial(physicsMaterial)
                 end
                 if profiling then recordDuration(impactStats, "physicsTime", physicsStartedAt) end
+
+                if comparing then
+                    local comparisonTime = profileClock() - comparisonStartedAt
+                    if legacyInitialization then
+                        impactStats.abLegacyProps = impactStats.abLegacyProps + 1
+                        impactStats.abLegacyTime = impactStats.abLegacyTime + comparisonTime
+                        if IsValid(physics) then impactStats.abLegacyPhysics = impactStats.abLegacyPhysics + 1 end
+                    else
+                        impactStats.abOptimizedProps = impactStats.abOptimizedProps + 1
+                        impactStats.abOptimizedTime = impactStats.abOptimizedTime + comparisonTime
+                        if IsValid(physics) then impactStats.abOptimizedPhysics = impactStats.abOptimizedPhysics + 1 end
+                    end
+                end
                 spawned = spawned + 1
             end
         end
@@ -892,6 +956,10 @@ function Visuals.ReportDebrisProfile()
 
     profilePrint("debris profile: " .. string.format("%.1f", elapsed) .. " seconds")
     profilePrint(
+        "initialization path: "
+            .. (compareInitialization and "alternating legacy/optimized A/B" or "optimized")
+    )
+    profilePrint(
         "active: " .. #debrisHeap .. " total, " .. activeModels .. " models, "
             .. activePhysics .. " physics (" .. sleepingPhysics .. " asleep), " .. fading .. " fading"
     )
@@ -918,9 +986,36 @@ function Visuals.ReportDebrisProfile()
             .. ", smoke " .. milliseconds(impacts.smokeTime / impactDivisor)
     )
     profilePrint(
-        "placement queries: " .. impacts.hullTraces .. " hull traces, " .. impacts.lineTraces
-            .. " line traces, " .. impacts.pointChecks .. " point checks"
+        "prop setup averages: transform/material " .. milliseconds(impacts.propTransformTime / impactDivisor)
+            .. ", collision " .. milliseconds(impacts.propCollisionTime / impactDivisor)
+            .. ", legacy Spawn " .. milliseconds(impacts.propSpawnTime / impactDivisor)
+            .. ", Activate " .. milliseconds(impacts.propActivateTime / impactDivisor)
     )
+    profilePrint(
+        "placement: " .. impacts.hullTraces .. " hull traces, " .. impacts.lineTraces
+            .. " line traces, " .. impacts.pointChecks .. " point checks, "
+            .. impacts.hullRejected .. " hull rejects, " .. impacts.placementRejected
+            .. " pre-creation rejects"
+    )
+
+    if impacts.abLegacyProps > 0 or impacts.abOptimizedProps > 0 then
+        local legacyAverage = impacts.abLegacyTime / math.max(impacts.abLegacyProps, 1)
+        local optimizedAverage = impacts.abOptimizedTime / math.max(impacts.abOptimizedProps, 1)
+        profilePrint(
+            "initialization A/B legacy: " .. impacts.abLegacyProps .. " props, "
+                .. milliseconds(legacyAverage) .. " each, " .. impacts.abLegacyPhysics
+                .. "/" .. impacts.abLegacyProps .. " physics ready"
+        )
+        profilePrint(
+            "initialization A/B optimized: " .. impacts.abOptimizedProps .. " props, "
+                .. milliseconds(optimizedAverage) .. " each, " .. impacts.abOptimizedPhysics
+                .. "/" .. impacts.abOptimizedProps .. " physics ready"
+        )
+        profilePrint(
+            "initialization A/B legacy minus optimized: "
+                .. milliseconds(legacyAverage - optimizedAverage) .. " per prop"
+        )
+    end
 
     local creationCount = creations.models + creations.props
     profilePrint(
@@ -962,6 +1057,28 @@ function Visuals.ReportDebrisProfile()
         end
     end
 
+    if frames.excludedPauses > 0 then
+        profilePrint(
+            "excluded pauses: " .. frames.excludedPauses .. " frames over "
+                .. math.floor(MAX_PROFILE_FRAME_TIME * 1000) .. " ms, "
+                .. milliseconds(frames.excludedPauseTime) .. " total, "
+                .. milliseconds(frames.longestPause) .. " longest"
+        )
+    end
+
+    return true
+end
+
+function Visuals.SetDebrisInitializationComparison(enabled)
+    if not profileActive then
+        profilePrint("run geblib_developer_debugmode 1 before using the debris profiler")
+        return false
+    end
+
+    compareInitialization = enabled == true
+    compareLegacyNext = true
+    Visuals.ResetDebrisProfile()
+    profilePrint("initialization A/B " .. (compareInitialization and "enabled" or "disabled"))
     return true
 end
 
@@ -979,6 +1096,11 @@ end
 if concommand and concommand.Add then
     concommand.Add("geblib_debris_profile_report", function() Visuals.ReportDebrisProfile() end)
     concommand.Add("geblib_debris_profile_reset", function() Visuals.ResetDebrisProfile() end)
+    concommand.Add("geblib_debris_profile_compare_init", function(_, _, arguments)
+        local value = arguments and arguments[1]
+        local numeric = tonumber(value)
+        Visuals.SetDebrisInitializationComparison(numeric and numeric ~= 0 or value == "true")
+    end)
 end
 
 setDebrisProfileActive(gebLib.DebugMode and gebLib.DebugMode())
