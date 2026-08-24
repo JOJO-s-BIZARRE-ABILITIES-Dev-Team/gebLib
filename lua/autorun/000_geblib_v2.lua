@@ -30,6 +30,7 @@ local sharedFiles = {
     "geblib/chat.lua",
     "geblib/player_animation.lua",
     "geblib/sound.lua",
+    "geblib/net_selftest.lua",
 }
 
 local clientFiles = {

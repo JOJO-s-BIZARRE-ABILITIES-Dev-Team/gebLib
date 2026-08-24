@@ -147,6 +147,24 @@ The server records packet and record rates, encoded bits, recipient fan-out, rep
 
 Profiler advice is based on observed traffic, not a proof of the domain limits. Confirm rare and future values before changing a released schema. Profiling is disabled by default, does not replace the global `net` functions, and never modifies a schema automatically.
 
+### In-game network self-test
+
+Enable development mode before entering a single-player or listen-server game:
+
+```text
+geblib_developer_debugmode 1
+```
+
+The network self-test starts automatically after the local player is fully connected. It round-trips every codec, both directions, targeted sends, broadcasts, automatic and explicit batch flushing, malformed-packet rejection, and per-player rate limiting. The client and server consoles print one `PASS` or `FAIL` result.
+
+Run it again without reconnecting:
+
+```text
+geblib_net_selftest
+```
+
+The test does nothing while development mode is disabled. Only the single-player client or listen-server host can start it.
+
 ## Status effects
 
 Register a definition once:
