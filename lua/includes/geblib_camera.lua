@@ -1,5 +1,6 @@
 gebLib_Camera = {}
 gebLib_Camera.__index = gebLib_Camera
+local nextCameraId = 0
 
 --------------------
 --Contributors: T0M
@@ -13,12 +14,17 @@ end
 
 --Constructor
 function gebLib_Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHooks)
+	if not IsValid(ply) then
+		error("Cannot create a gebLib camera for an invalid player")
+	end
+
 	if createFake == nil then createFake = true end
 	if useDefaultHooks == nil then useDefaultHooks = true end
 	if fps == nil then fps = 60 end
 	if maxFrames and maxFrames < 0 then maxFrames = nil end
 	
-    self = setmetatable({}, gebLib_Camera)
+    local self = setmetatable({}, gebLib_Camera)
+    nextCameraId = nextCameraId + 1
 
     self.Name = name
     self.Player = ply
@@ -30,6 +36,7 @@ function gebLib_Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHook
     self.Playing = false
 	self.Simulated = false
     self.ThinkName = nil
+    self.HookName = "gebLib.Camera." .. nextCameraId
     self.EndFunc = nil
     self.ThinkFunc = nil
 	self.UseDefaultHooks = useDefaultHooks
@@ -54,16 +61,17 @@ end
 
 --General Functions
 function gebLib_Camera:Play(simulate)
+    if self.Playing or not IsValid(self.Player) then return end
+
     self.Playing = true
     self.Start = SysTime()
-    self.ThinkName = tostring(self)
+    self.ThinkName = self.HookName
 	self.Simulated = simulate
-
-	self:AddDefaultHooks()
 
     --Reset event start times
     for frame, data in pairs(self.Events) do
         data.Start = SysTime()
+        data.Ended = false
     end
 
 	-- If user has not specified the ending frame of the camera, then try to figure it from events
@@ -78,6 +86,8 @@ function gebLib_Camera:Play(simulate)
 
 		self.MaxFrames = largestEventFrame
 	end
+
+	self:AddDefaultHooks()
 
 	if SERVER then
 		hook.Add("Think", self.ThinkName, function()
@@ -97,7 +107,7 @@ function gebLib_Camera:Play(simulate)
     
     if not simulate then
         hook.Add("CalcView", self.ThinkName, function(ply, pos, angles, fov)
-            if not self.Player:IsValid() then self:Stop() return end
+            if not IsValid(self.Player) then self:Stop() return end
             
             self.CurFrame = (SysTime() - self.Start) * self.FPS
             local view = {
@@ -112,24 +122,26 @@ function gebLib_Camera:Play(simulate)
             
             for frame, data in pairs(self.Events) do
                 if not data.Ended and data.Function and self.CurFrame >= frame and self.CurFrame <= data.EndFrame then
-                    view.origin, view.angles = data.Function(ply, pos, angles, fov)
+                    local origin, viewAngles = data.Function(ply, pos, angles, fov)
+                    if origin then view.origin = origin end
+                    if viewAngles then view.angles = viewAngles end
+                    if not self.Playing then return view end
                 elseif not data.Ended and data.Function and self.CurFrame >= frame and self.CurFrame >= data.EndFrame then
                     data.Ended = true
                 end
             end
             
             if self.CurFrame >= self.MaxFrames then
-                self.EndFunc(self) -- TODO: Not sure about this
                 self:Stop()
             end
             
             self.LastPos = view.origin
             self.LastAng = view.angles
             return view
-        end, HOOK_HIGH)
+        end)
     else --For other players, simulate the camera behaviour, so everything is properly synced
         hook.Add("Think", self.ThinkName, function()
-            if not self.Player:IsValid() then self:Stop() return end
+            if not IsValid(self.Player) then self:Stop() return end
 
             self.CurFrame = (SysTime() - self.Start) * self.FPS
             local ply = self.Player
@@ -144,6 +156,7 @@ function gebLib_Camera:Play(simulate)
             for frame, data in pairs(self.Events) do
                 if not data.Ended and data.Function and self.CurFrame >= frame and self.CurFrame <= data.EndFrame then
                     data.Function(ply, pos, angles, fov)
+                    if not self.Playing then return end
                 elseif not data.Ended and data.Function and self.CurFrame >= frame and self.CurFrame >= data.EndFrame then
                     data.Ended = true
                 end
@@ -157,14 +170,20 @@ function gebLib_Camera:Play(simulate)
 end
 
 function gebLib_Camera:Stop()
+    if not self.Playing then return end
+
+	self.Playing = false
 	self:RemoveDefaultHooks()
-    self.EndFunc(self)
 
-    self.Playing = false
-
-	self.Player:SetNoDraw(false)
-	if CLIENT then
+	if IsValid(self.Player) then
+		self.Player:SetNoDraw(false)
+	end
+	if CLIENT and IsValid(self.Copy) then
 		self.Copy:Remove()
+	end
+
+	if self.EndFunc then
+		self.EndFunc(self)
 	end
 end
 
@@ -178,7 +197,7 @@ end
 
 function gebLib_Camera:AddEvent(initFrame, endFrame, func)
 	if endFrame == nil or endFrame < 0 then
-		endFrame = self.MaxFrames
+		endFrame = self.MaxFrames or initFrame
 	end
 
     self.Events[initFrame] = {Function = func, Ended = false, EndFrame = endFrame, Start = 0}
@@ -222,38 +241,41 @@ function gebLib_Camera:AddDefaultHooks()
 	local animDuration = 1 
 
 	if not self.Simulated then
-		hook.Add("DrawOverlay", tostring(self) .. "_BlackBars", function()
-			local lerpedSize = Lerp((SysTime() - start) / animDuration, 0, blackBarSize)
-			local lerpedBottom = Lerp((SysTime() - start) / animDuration, screenHeight + 1, bottomPos) --Need to lerp the bottom pos, so it goes from down to up
+		hook.Add("DrawOverlay", self.HookName .. "_BlackBars", function()
+			local progress = math.Clamp((SysTime() - start) / animDuration, 0, 1)
+			local lerpedSize = Lerp(progress, 0, blackBarSize)
+			local lerpedBottom = Lerp(progress, screenHeight + 1, bottomPos) --Need to lerp the bottom pos, so it goes from down to up
 	
 			surface.SetDrawColor(color_black)
 			surface.DrawRect(0, 0, screenWidth, lerpedSize)
 			surface.DrawRect(0, lerpedBottom, screenWidth, lerpedSize)
 		end)
 		
-		hook.Add("HUDShouldDraw", tostring(self) .. "_NoHud", function()
+		hook.Add("HUDShouldDraw", self.HookName .. "_NoHud", function()
 			return false
 		end)
 	end
 
-	hook.Add("Think", tostring(self) .. "_DefaultThink", function()
+	hook.Add("Think", self.HookName .. "_DefaultThink", function()
 		local owner = self.Player
 
 		if not self:IsValid() then self:Stop() return end
 
-        owner:SetNoDraw(true)
-        owner:SetEyeAngles(self.OldAng)
-        owner:SetPos(self.OldPos)
+		owner:SetNoDraw(true)
+		if self.OldAng then owner:SetEyeAngles(self.OldAng) end
+		if self.OldPos then owner:SetPos(self.OldPos) end
 	end)
 end
 
 function gebLib_Camera:RemoveDefaultHooks()
-	hook.Remove("DrawOverlay", tostring(self) .. "_BlackBars")
-	hook.Remove("HUDShouldDraw", tostring(self) .. "_NoHud")
-	hook.Remove("Think", tostring(self) .. "_DefaultThink")
+	hook.Remove("DrawOverlay", self.HookName .. "_BlackBars")
+	hook.Remove("HUDShouldDraw", self.HookName .. "_NoHud")
+	hook.Remove("Think", self.HookName .. "_DefaultThink")
 
-	hook.Remove("CalcView", self.ThinkName)
-    hook.Remove("Think", self.ThinkName)
+	if self.ThinkName then
+		hook.Remove("CalcView", self.ThinkName)
+		hook.Remove("Think", self.ThinkName)
+	end
 end
 
 --Helper Functions
@@ -279,7 +301,7 @@ function gebLib_Camera:FrameFirstTime(frame)
 end
 
 function gebLib_Camera:IsValid()
-	return self.Player:IsValid() and self.Player:Alive()
+	return IsValid(self.Player) and self.Player:Alive()
 end
 
 function gebLib_Camera:__tostring()

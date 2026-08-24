@@ -31,7 +31,7 @@ gebLib.ImportFile( includes .. "geblib_animation.lua" )
 gebLib.ImportFile( includes .. "geblib_camera.lua" )
 gebLib.ImportFile( includes .. "geblib_statuseffect.lua" )
 gebLib.ImportFile( includes .. "geblib_powerlevels.lua" )
-gebLib.ImportFile( includes .. "gebLib_sound.lua" )
+gebLib.ImportFile( includes .. "geblib_sound.lua" )
 --------------------------
 //
 --------------------------
@@ -57,13 +57,24 @@ if SERVER then
     gameevent.Listen("OnRequestFullUpdate")
 
     hook.Add("OnRequestFullUpdate", "gebLib_InitialConnect", function(data)
-        if not playersConnected[data.userid] then
-            playersConnected[data.userid] = true
-            -- Needs to be run on the next tick, because this runs slighty before client stage, so we cannot send net messages to players
-            timer.Simple(0, function()
-                hook.Run("gebLib_PlayerFullyConnected", Player(data.userid))
-            end)
-        end
+        local userId = data.userid
+        if playersConnected[userId] then return end
+
+        playersConnected[userId] = true
+        -- Needs to be run on the next tick, because this runs slighty before client stage, so we cannot send net messages to players
+        timer.Simple(0, function()
+            local ply = Player(userId)
+            if not IsValid(ply) or ply:UserID() ~= userId then
+                playersConnected[userId] = nil
+                return
+            end
+
+            hook.Run("gebLib_PlayerFullyConnected", ply)
+        end)
+    end)
+
+    hook.Add("PlayerDisconnected", "gebLib_InitialConnectCleanup", function(ply)
+        playersConnected[ply:UserID()] = nil
     end)
 end
 
