@@ -301,6 +301,16 @@ gebLib.Drawing.TextWithShadow(text, font, x, y, color)
 local duration = gebLib.SoundDuration("sound/example.mp3")
 ```
 
+Debris is client-only and capped at 512 active entities by default. Creating another removes the debris that would expire next. Change `gebLib.Visuals.MaxDebris` before creating debris when a feature needs a different budget.
+
+`CreateDebris` uses one shared expiry scheduler instead of a per-frame scan. Render-only `ClientsideModel` debris grows through engine interpolation. Physical client props skip animated scaling to avoid client trace errors. All debris fades during its final second.
+
+```lua
+print(gebLib.Visuals.GetDebrisCount())
+gebLib.Visuals.RemoveDebris(debris)
+gebLib.Visuals.ClearDebris()
+```
+
 `gebLib_ChatAddText` accepts up to 32 string or color arguments. Each string is limited to 1024 bytes.
 
 Entity helpers remain available for living-entity checks, looking direction, nearby collision checks, empty-position searches, bone hitboxes, and dissolving.
@@ -346,8 +356,11 @@ lua tests/net_test.lua
 lua tests/network_features_test.lua
 lua tests/status_effects_test.lua
 lua tests/action_test.lua
+lua tests/visuals_test.lua
 ```
 
 All shipped Lua files use Lua 5.1-compatible syntax. They are checked with LuaJIT and `luac -p`.
 
 Run the optional local CPU benchmark with `lua tests/net_benchmark.lua` or `luajit tests/net_benchmark.lua`. It compares schema sends against equivalent direct `net` calls in a Lua mock. It is useful for tracking wrapper overhead, but only an in-game benchmark can measure Source networking and real addon traffic.
+
+Run `lua tests/visuals_benchmark.lua` or `luajit tests/visuals_benchmark.lua` to measure debris creation and idle-frame overhead. It does not measure engine rendering or physics cost.
