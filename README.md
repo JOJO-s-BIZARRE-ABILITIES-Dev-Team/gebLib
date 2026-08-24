@@ -34,6 +34,100 @@ The bootstrap sets `gebLib.Loaded` only after every module has been included, th
 
 Workshop Required Items can advertise and install gebLib, but do not control Lua execution order.
 
+## Networking
+
+Define each message once in a shared file. The schema is the packet order used by both realms.
+
+```lua
+local Hit = gebLib.Net.ToClient("myaddon.hit", {
+    gebLib.Net.Entity,
+    gebLib.Net.UInt(12),
+    gebLib.Net.Bool,
+})
+```
+
+Send it from the server:
+
+```lua
+Hit:Send(player, target, damage, critical)
+Hit:Broadcast(target, damage, critical)
+```
+
+Receive it on the client:
+
+```lua
+Hit:Receive(function(target, damage, critical)
+    -- Handle the message.
+end)
+```
+
+Client-to-server messages require an explicit per-player rate limit:
+
+```lua
+local SelectAbility = gebLib.Net.ToServer("myaddon.select_ability", {
+    gebLib.Net.UInt(6),
+}, {
+    rate = 8,
+    burst = 4,
+})
+
+if CLIENT then
+    SelectAbility:Send(abilityId)
+else
+    SelectAbility:Receive(function(player, abilityId)
+        -- Validate permissions and gameplay state here.
+    end)
+end
+```
+
+Use `rate = false` to make a deliberate exception. Structural decoding does not replace server-side permission or gameplay validation.
+
+The available codecs are:
+
+```lua
+gebLib.Net.Bool
+gebLib.Net.UInt(bits)
+gebLib.Net.Int(bits)
+gebLib.Net.Range(minimum, maximum)
+gebLib.Net.Float
+gebLib.Net.Double
+gebLib.Net.String(maxBytes)
+gebLib.Net.Entity
+gebLib.Net.Player
+gebLib.Net.Vector
+gebLib.Net.Normal
+gebLib.Net.Angle
+gebLib.Net.Color
+gebLib.Net.Optional(codec)
+gebLib.Net.Array(codec, maxCount)
+gebLib.Net.OneOf({codecA, codecB})
+```
+
+`Range` offsets a bounded integer range and derives the smallest unsigned width. `OneOf` writes a compact choice tag and uses the first codec that accepts the value, so put narrower overlapping codecs first.
+
+Messages use their own native pooled names and contain no route strings, field names, or automatic type tags. Names must be lowercase, namespaced, and at most 64 characters. Change the name, such as from `myaddon.hit` to `myaddon.hit.v2`, when changing a released wire schema.
+
+Use `unreliable = true` only when losing a packet is acceptable. Persistent entity state still belongs in `NetworkVar`, NW2 where appropriate, or a feature-owned snapshot protocol.
+
+### Network profiler
+
+Enable profiling in a development session:
+
+```text
+geblib_net_profile 1
+```
+
+Print or reset the report:
+
+```text
+geblib_net_profile_report
+geblib_net_profile_reset
+```
+
+The server records message rate, encoded bits, recipient fan-out, repeated payloads, malformed packets, rate-limit drops, and observed field ranges. After at least 256 samples and 30 seconds, it can suggest smaller integer widths, bounded strings or arrays, `Normal` instead of `Vector`, `Player` instead of `Entity`, or an integer codec instead of `Float`.
+
+Profiler advice is based on observed traffic, not a proof of the domain limits. Confirm rare and future values before changing a released schema. Profiling is disabled by default, does not replace the global `net` functions, and never modifies a schema automatically.
+
 ## Status effects
 
 Register a definition once:
@@ -137,7 +231,7 @@ player:gebLib_ResumeAction(playback)
 player:gebLib_StopAction()
 ```
 
-The server synchronizes these operations through one feature-owned network message.
+The server synchronizes these operations through four typed messages for play, pause, resume, and stop.
 
 ## Cinematic cameras
 
@@ -170,6 +264,8 @@ gebLib.Drawing.TextWithShadow(text, font, x, y, color)
 local duration = gebLib.SoundDuration("sound/example.mp3")
 ```
 
+`gebLib_ChatAddText` accepts up to 32 string or color arguments. Each string is limited to 1024 bytes.
+
 Entity helpers remain available for living-entity checks, looking direction, nearby collision checks, empty-position searches, bone hitboxes, and dissolving.
 
 The focused helper methods are:
@@ -199,7 +295,7 @@ end)
 - `gebLib_StopAnim`, `gebLib_PauseAnim`, and `gebLib_ResumeAnim` are now the corresponding `Sequence` methods.
 - `gebLib_PlayerFullyConnected` is now `gebLib.PlayerFullyConnected`.
 - Status effects use registered definitions instead of copied class-like tables.
-- Generic entity-field networking, Power Level, global entity/player caches, global blacklists, unfinished Derma controls, and unrelated utility helpers were removed.
+- Generic entity-field networking was replaced by typed `gebLib.Net` messages. Power Level, global entity/player caches, global blacklists, unfinished Derma controls, and unrelated utility helpers were removed.
 - Debris and decals moved to `gebLib.Visuals`.
 - Drawing helpers moved to `gebLib.Drawing`.
 
@@ -209,6 +305,8 @@ Run the focused tests from the addon root:
 
 ```powershell
 lua tests/bootstrap_test.lua
+lua tests/net_test.lua
+lua tests/network_features_test.lua
 lua tests/status_effects_test.lua
 lua tests/action_test.lua
 ```

@@ -1,6 +1,12 @@
 local Player = FindMetaTable("Player")
+local unpackArguments = unpack or table.unpack
 
-local messageName = "gebLib.Chat"
+local chatMessage = gebLib.Net.ToClient("geblib.chat", {
+    gebLib.Net.Array(gebLib.Net.OneOf({
+        gebLib.Net.String(1024),
+        gebLib.Net.Color,
+    }), 32),
+})
 
 local function normalizeArguments(arguments)
     for index, value in ipairs(arguments) do
@@ -18,23 +24,16 @@ function Player:gebLib_ChatAddText(...)
     local arguments = {...}
 
     if CLIENT then
-        chat.AddText(unpack(normalizeArguments(arguments)))
+        chat.AddText(unpackArguments(normalizeArguments(arguments)))
         return
     end
 
     if not IsValid(self) then return end
-
-    net.Start(messageName)
-    net.WriteTable(arguments)
-    net.Send(self)
+    chatMessage:Send(self, arguments)
 end
 
-if SERVER then
-    util.AddNetworkString(messageName)
-else
-    net.Receive(messageName, function()
-        local arguments = net.ReadTable()
-        if not istable(arguments) then return end
-        chat.AddText(unpack(normalizeArguments(arguments)))
+if CLIENT then
+    chatMessage:Receive(function(arguments)
+        chat.AddText(unpackArguments(normalizeArguments(arguments)))
     end)
 end

@@ -21,6 +21,7 @@ function gebLib.PrintDebug(...)
 end
 
 local sharedFiles = {
+    "geblib/net.lua",
     "geblib/entities.lua",
     "geblib/action.lua",
     "geblib/animation.lua",

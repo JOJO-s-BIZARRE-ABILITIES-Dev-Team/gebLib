@@ -1,10 +1,29 @@
 local Player = FindMetaTable("Player")
 
-local messageName = "gebLib.PlayerAnimation"
-local PLAY = 0
-local STOP = 1
-local PAUSE = 2
-local RESUME = 3
+local playMessage = gebLib.Net.ToClient("geblib.player_animation.play", {
+    gebLib.Net.Player,
+    gebLib.Net.UInt(3),
+    gebLib.Net.UInt(16),
+    gebLib.Net.Float,
+    gebLib.Net.Bool,
+    gebLib.Net.Float,
+})
+
+local stopMessage = gebLib.Net.ToClient("geblib.player_animation.stop", {
+    gebLib.Net.Player,
+    gebLib.Net.UInt(3),
+})
+
+local pauseMessage = gebLib.Net.ToClient("geblib.player_animation.pause", {
+    gebLib.Net.Player,
+    gebLib.Net.UInt(3),
+})
+
+local resumeMessage = gebLib.Net.ToClient("geblib.player_animation.resume", {
+    gebLib.Net.Player,
+    gebLib.Net.UInt(3),
+    gebLib.Net.Float,
+})
 
 local function shouldApplyPredicted(player)
     if SERVER then return true end
@@ -35,24 +54,9 @@ local function applyStop(player, slot)
     end
 end
 
-local function send(player, operation, slot, sequence, cycle, autokill, playback)
+local function sendPlay(player, slot, sequence, cycle, autokill, playback)
     if CLIENT then return end
-
-    net.Start(messageName)
-    net.WriteEntity(player)
-    net.WriteUInt(operation, 2)
-    net.WriteUInt(slot, 3)
-
-    if operation == PLAY then
-        net.WriteUInt(sequence, 16)
-        net.WriteFloat(cycle)
-        net.WriteBool(autokill)
-        net.WriteFloat(playback)
-    elseif operation == RESUME then
-        net.WriteFloat(playback)
-    end
-
-    net.Broadcast()
+    playMessage:Broadcast(player, slot, sequence, cycle, autokill, playback)
 end
 
 local function validSlot(slot)
@@ -73,21 +77,21 @@ function Player:gebLib_PlaySequence(slot, sequence, cycle, autokill, playback)
     cycle = math.Clamp(cycle, 0, 1)
 
     applyPlay(self, slot, sequence, cycle, autokill, playback)
-    send(self, PLAY, slot, sequence, cycle, autokill, playback)
+    sendPlay(self, slot, sequence, cycle, autokill, playback)
     return true
 end
 
 function Player:gebLib_StopSequence(slot)
     if not IsValid(self) or not validSlot(slot) or not shouldApplyPredicted(self) then return false end
     applyStop(self, slot)
-    send(self, STOP, slot)
+    if SERVER then stopMessage:Broadcast(self, slot) end
     return true
 end
 
 function Player:gebLib_PauseSequence(slot)
     if not IsValid(self) or not validSlot(slot) or not shouldApplyPredicted(self) then return false end
     self:SetLayerPlaybackRate(slot, 0)
-    send(self, PAUSE, slot)
+    if SERVER then pauseMessage:Broadcast(self, slot) end
     return true
 end
 
@@ -96,7 +100,7 @@ function Player:gebLib_ResumeSequence(slot, playback)
     playback = playback or 1
     if not isnumber(playback) then return false end
     self:SetLayerPlaybackRate(slot, playback)
-    send(self, RESUME, slot, nil, nil, nil, playback)
+    if SERVER then resumeMessage:Broadcast(self, slot, playback) end
     return true
 end
 
@@ -116,24 +120,20 @@ function Player:gebLib_ResumeAction(playback)
     return self:gebLib_ResumeSequence(1, playback)
 end
 
-if SERVER then
-    util.AddNetworkString(messageName)
-else
-    net.Receive(messageName, function()
-        local player = net.ReadEntity()
-        local operation = net.ReadUInt(2)
-        local slot = net.ReadUInt(3)
+if CLIENT then
+    playMessage:Receive(function(player, slot, sequence, cycle, autokill, playback)
+        applyPlay(player, slot, sequence, cycle, autokill, playback)
+    end)
 
-        if not IsValid(player) or not player:IsPlayer() then return end
+    stopMessage:Receive(function(player, slot)
+        applyStop(player, slot)
+    end)
 
-        if operation == PLAY then
-            applyPlay(player, slot, net.ReadUInt(16), net.ReadFloat(), net.ReadBool(), net.ReadFloat())
-        elseif operation == STOP then
-            applyStop(player, slot)
-        elseif operation == PAUSE then
-            player:SetLayerPlaybackRate(slot, 0)
-        elseif operation == RESUME then
-            player:SetLayerPlaybackRate(slot, net.ReadFloat())
-        end
+    pauseMessage:Receive(function(player, slot)
+        player:SetLayerPlaybackRate(slot, 0)
+    end)
+
+    resumeMessage:Receive(function(player, slot, playback)
+        player:SetLayerPlaybackRate(slot, playback)
     end)
 end
