@@ -1,6 +1,8 @@
-gebLib_Camera = {}
-gebLib_Camera.__index = gebLib_Camera
-local nextCameraId = 0
+gebLib.Camera = {}
+gebLib.Camera.__index = gebLib.Camera
+
+local Camera = gebLib.Camera
+gebLib._NextCameraId = gebLib._NextCameraId or 0
 
 --------------------
 --Contributors: T0M
@@ -13,7 +15,7 @@ local function RenderOverride(self)
 end
 
 --Constructor
-function gebLib_Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHooks)
+function Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHooks)
 	if not IsValid(ply) then
 		error("Cannot create a gebLib camera for an invalid player")
 	end
@@ -21,10 +23,16 @@ function gebLib_Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHook
 	if createFake == nil then createFake = true end
 	if useDefaultHooks == nil then useDefaultHooks = true end
 	if fps == nil then fps = 60 end
+	if not isnumber(fps) or fps <= 0 then
+		error("camera fps must be greater than zero", 2)
+	end
+	if maxFrames ~= nil and not isnumber(maxFrames) then
+		error("camera max frames must be a number", 2)
+	end
 	if maxFrames and maxFrames < 0 then maxFrames = nil end
 	
-    local self = setmetatable({}, gebLib_Camera)
-    nextCameraId = nextCameraId + 1
+    local self = setmetatable({}, Camera)
+    gebLib._NextCameraId = gebLib._NextCameraId + 1
 
     self.Name = name
     self.Player = ply
@@ -36,10 +44,11 @@ function gebLib_Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHook
     self.Playing = false
 	self.Simulated = false
     self.ThinkName = nil
-    self.HookName = "gebLib.Camera." .. nextCameraId
+    self.HookName = "gebLib.Camera." .. gebLib._NextCameraId
     self.EndFunc = nil
     self.ThinkFunc = nil
 	self.UseDefaultHooks = useDefaultHooks
+	self.CreateFake = createFake
 
     self.CurFrame = 0
     self.Start = 0
@@ -52,40 +61,42 @@ function gebLib_Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHook
     self.LastPos = vector_origin
     self.LastAng = angle_zero
 
-	if createFake and CLIENT then
-		self:AddFakePlayerCopy()
-	end
-
     return self
 end
 
 --General Functions
-function gebLib_Camera:Play(simulate)
+function Camera:Play(simulate)
     if self.Playing or not IsValid(self.Player) then return end
 
+	local maxFrames = self.MaxFrames
+	if maxFrames == nil then
+		for _, event in pairs(self.Events) do
+			if maxFrames == nil or event.EndFrame > maxFrames then
+				maxFrames = event.EndFrame
+			end
+		end
+	end
+
+	if maxFrames == nil then
+		error("camera requires maxFrames or at least one event", 2)
+	end
+
+	self.MaxFrames = maxFrames
     self.Playing = true
     self.Start = SysTime()
     self.ThinkName = self.HookName
 	self.Simulated = simulate
+	self.FrameChecks = {}
+
+	if CLIENT and self.CreateFake and not IsValid(self.Copy) then
+		self:AddFakePlayerCopy()
+	end
 
     --Reset event start times
     for frame, data in pairs(self.Events) do
         data.Start = SysTime()
         data.Ended = false
     end
-
-	-- If user has not specified the ending frame of the camera, then try to figure it from events
-	if not self.MaxFrames then
-		local largestEventFrame = -1
-	
-		for frame, data in pairs(self.Events) do
-			if data.EndFrame > largestEventFrame then
-				largestEventFrame = data.EndFrame
-			end
-		end
-
-		self.MaxFrames = largestEventFrame
-	end
 
 	self:AddDefaultHooks()
 
@@ -169,7 +180,7 @@ function gebLib_Camera:Play(simulate)
     end
 end
 
-function gebLib_Camera:Stop()
+function Camera:Stop()
     if not self.Playing then return end
 
 	self.Playing = false
@@ -187,26 +198,45 @@ function gebLib_Camera:Stop()
 	end
 end
 
-function gebLib_Camera:SetThink(func)
+function Camera:SetThink(func)
     self.ThinkFunc = func
 end
 
-function gebLib_Camera:SetEnd(func)
+function Camera:SetEnd(func)
     self.EndFunc = func
 end
 
-function gebLib_Camera:AddEvent(initFrame, endFrame, func)
-	if endFrame == nil or endFrame < 0 then
+function Camera:AddEvent(initFrame, endFrame, func)
+	if not isnumber(initFrame) or initFrame < 0 then
+		error("camera event start frame must be zero or greater", 2)
+	end
+
+	if endFrame == nil then
 		endFrame = self.MaxFrames or initFrame
+	end
+
+	if not isnumber(endFrame) then
+		error("camera event end frame must be a number", 2)
+	end
+
+	if endFrame < 0 then
+		endFrame = self.MaxFrames or initFrame
+	end
+
+	if endFrame < initFrame then
+		error("camera event end frame must not precede its start frame", 2)
+	end
+
+	if not isfunction(func) then
+		error("camera event callback must be a function", 2)
 	end
 
     self.Events[initFrame] = {Function = func, Ended = false, EndFrame = endFrame, Start = 0}
 end
 
-function gebLib_Camera:AddFakePlayerCopy()
+function Camera:AddFakePlayerCopy()
 	local ply = self.Player
     
-    --Experimental
     local angles = ply:GetAimVector():Angle()
     angles:Normalize()
     angles.x = 0
@@ -228,7 +258,7 @@ function gebLib_Camera:AddFakePlayerCopy()
 	self.Copy = copy
 end
 
-function gebLib_Camera:AddDefaultHooks()
+function Camera:AddDefaultHooks()
 	if SERVER then return end
 	if not self.UseDefaultHooks then return end
 
@@ -261,13 +291,13 @@ function gebLib_Camera:AddDefaultHooks()
 
 		if not self:IsValid() then self:Stop() return end
 
-		owner:SetNoDraw(true)
+		owner:SetNoDraw(IsValid(self.Copy))
 		if self.OldAng then owner:SetEyeAngles(self.OldAng) end
 		if self.OldPos then owner:SetPos(self.OldPos) end
 	end)
 end
 
-function gebLib_Camera:RemoveDefaultHooks()
+function Camera:RemoveDefaultHooks()
 	hook.Remove("DrawOverlay", self.HookName .. "_BlackBars")
 	hook.Remove("HUDShouldDraw", self.HookName .. "_NoHud")
 	hook.Remove("Think", self.HookName .. "_DefaultThink")
@@ -282,7 +312,7 @@ end
 --Returns the time based on the fps, end frame and the current frame, this should be used with every lerp function.
 --Formula for creating this
 --(SysTime() - someTimeBefore) / (eventLength / cameraFPS)
-function gebLib_Camera:GetTime(startFrame, endFrame, mult)
+function Camera:GetTime(startFrame, endFrame, mult)
     mult = mult or 1
 
     local result = math.Remap(self.CurFrame, startFrame, endFrame, 0, 1)
@@ -291,7 +321,7 @@ end
 
 --Used for one time logic in the current cinematic
 --- if (Camera:FrameFirstTime(50)) then do stuff will only run once when the frame first ran
-function gebLib_Camera:FrameFirstTime(frame)
+function Camera:FrameFirstTime(frame)
     if self.CurFrame >= frame and not self.FrameChecks[frame] then
         self.FrameChecks[frame] = true
         return true
@@ -300,10 +330,10 @@ function gebLib_Camera:FrameFirstTime(frame)
     return false
 end
 
-function gebLib_Camera:IsValid()
+function Camera:IsValid()
 	return IsValid(self.Player) and self.Player:Alive()
 end
 
-function gebLib_Camera:__tostring()
+function Camera:__tostring()
 	return self.Name .. "_" .. tostring(self.Player)
 end

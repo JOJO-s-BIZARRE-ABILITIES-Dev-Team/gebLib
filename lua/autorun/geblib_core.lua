@@ -1,85 +1,87 @@
-// Developed by T0M and jopster1336
---------------------------
-//
-gebLib = {}
-gebLib.Version = "0.0.0"
-//
---------------------------
-function gebLib.PrintDebug(...) -- Equivalent to print(), however prints only if gebLib_developer_debugmode is on 
-    if !gebLib.DebugMode() then return end
-    print("[gebLib Debug]", unpack({...}))
-end
+-- Developed by T0M and jopster1336
 
-function gebLib.ImportFile( filePath, clientOnly )
-	AddCSLuaFile( filePath )
-	if !clientOnly or ( clientOnly and CLIENT ) then
-		include( filePath )
-	end
-end
---------------------------
-local includes = "includes/"
-local modules = includes .. "modules/"
-local iderma = includes .. "derma/"
---------------------------
-gebLib.ImportFile( includes .. "geblib_globals.lua" )
-gebLib.ImportFile( includes .. "geblib_enums.lua" )
-gebLib.ImportFile( includes .. "geblib_action.lua" )
-gebLib.ImportFile( includes .. "geblib_utilities.lua" )
-gebLib.ImportFile( includes .. "geblib_cache.lua" )
-gebLib.ImportFile( includes .. "geblib_network.lua" )
-gebLib.ImportFile( includes .. "geblib_animation.lua" )
-gebLib.ImportFile( includes .. "geblib_camera.lua" )
-gebLib.ImportFile( includes .. "geblib_statuseffect.lua" )
-gebLib.ImportFile( includes .. "geblib_powerlevels.lua" )
-gebLib.ImportFile( includes .. "geblib_sound.lua" )
---------------------------
-//
---------------------------
-// DEBUGGING
-CreateConVar( "geblib_developer_debugmode", 0, { FCVAR_REPLICATED, FCVAR_ARCHIVE, FCVAR_PROTECTED }, "[DEVELOPER] Debug Mode" )
-CreateConVar( "geblib_developer_debugnetwork", 0, { FCVAR_REPLICATED, FCVAR_ARCHIVE, FCVAR_PROTECTED }, "[DEVELOPER] Displays network debug messages" )
+gebLib = gebLib or {}
+gebLib.Version = "2.0.0"
+
+CreateConVar(
+    "geblib_developer_debugmode",
+    "0",
+    {FCVAR_REPLICATED, FCVAR_ARCHIVE, FCVAR_PROTECTED},
+    "Enable gebLib debug messages"
+)
 
 function gebLib.DebugMode()
-	return GetConVar("geblib_developer_debugmode"):GetBool()
+    return GetConVar("geblib_developer_debugmode"):GetBool()
 end
 
-function gebLib.NetworkDebug()
-	return GetConVar("geblib_developer_debugnetwork"):GetBool()
+function gebLib.PrintDebug(...)
+    if not gebLib.DebugMode() then return end
+    print("[gebLib]", ...)
 end
---------------------------
-// 
 
-// For some reason i enjoy making these frames for chunks of code
+local sharedFiles = {
+    "includes/geblib_entities.lua",
+    "includes/geblib_action.lua",
+    "includes/geblib_animation.lua",
+    "includes/geblib_camera.lua",
+    "includes/geblib_status_effects.lua",
+    "includes/geblib_chat.lua",
+    "includes/geblib_player_animation.lua",
+    "includes/geblib_sound.lua",
+}
 
--- Player connnection handling
+local clientFiles = {
+    "includes/geblib_drawing.lua",
+    "includes/geblib_visuals.lua",
+}
+
 if SERVER then
-    local playersConnected = {}
-    gameevent.Listen("OnRequestFullUpdate")
+    for _, path in ipairs(sharedFiles) do
+        AddCSLuaFile(path)
+    end
 
-    hook.Add("OnRequestFullUpdate", "gebLib_InitialConnect", function(data)
-        local userId = data.userid
-        if playersConnected[userId] then return end
+    for _, path in ipairs(clientFiles) do
+        AddCSLuaFile(path)
+    end
+end
 
-        playersConnected[userId] = true
-        -- Needs to be run on the next tick, because this runs slighty before client stage, so we cannot send net messages to players
-        timer.Simple(0, function()
-            local ply = Player(userId)
-            if not IsValid(ply) or ply:UserID() ~= userId then
-                playersConnected[userId] = nil
-                return
-            end
-
-            hook.Run("gebLib_PlayerFullyConnected", ply)
-        end)
-    end)
-
-    hook.Add("PlayerDisconnected", "gebLib_InitialConnectCleanup", function(ply)
-        playersConnected[ply:UserID()] = nil
-    end)
+for _, path in ipairs(sharedFiles) do
+    include(path)
 end
 
 if CLIENT then
-    hook.Add("InitPostEntity", "gebLib_InitialConnect", function()
-        hook.Run("gebLib_PlayerFullyConnected", LocalPlayer())
+    for _, path in ipairs(clientFiles) do
+        include(path)
+    end
+end
+
+if SERVER then
+    local connectedPlayers = {}
+
+    gameevent.Listen("OnRequestFullUpdate")
+
+    hook.Add("OnRequestFullUpdate", "gebLib.PlayerFullyConnected", function(data)
+        local userId = data.userid
+        if connectedPlayers[userId] then return end
+
+        connectedPlayers[userId] = true
+
+        timer.Simple(0, function()
+            local player = Player(userId)
+            if not IsValid(player) or player:UserID() ~= userId then
+                connectedPlayers[userId] = nil
+                return
+            end
+
+            hook.Run("gebLib.PlayerFullyConnected", player)
+        end)
+    end)
+
+    hook.Add("PlayerDisconnected", "gebLib.PlayerFullyConnected", function(player)
+        connectedPlayers[player:UserID()] = nil
+    end)
+else
+    hook.Add("InitPostEntity", "gebLib.PlayerFullyConnected", function()
+        hook.Run("gebLib.PlayerFullyConnected", LocalPlayer())
     end)
 end

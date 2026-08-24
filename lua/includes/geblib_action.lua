@@ -1,191 +1,212 @@
--- An Action class, for handling timed actions. Used instead of timers. Does not support prediction
--- I literally took it from Dragon Ball GM
-local gebLib = gebLib
---
-gebLib.Action         = {}
+gebLib.Action = {}
 gebLib.Action.__index = gebLib.Action
---
-local Action = gebLib.Action
-Action.ActionList     = {}
 
-function Action.Create( entity, duration )
-    local durTime = duration or 0 
-    if isnumber( entity ) and not duration then
-        durTime = entity
+local Action = gebLib.Action
+
+gebLib._NextActionId = gebLib._NextActionId or 0
+
+local function nextId()
+    gebLib._NextActionId = gebLib._NextActionId + 1
+    return gebLib._NextActionId
+end
+
+local function resetEvents(action)
+    for _, event in pairs(action.Events) do
+        event.played = false
+    end
+end
+
+function Action.New(entity, duration)
+    if isnumber(entity) and duration == nil then
+        duration = entity
         entity = game.GetWorld()
     end
 
-    local self = setmetatable( {}, Action )
-    self.Entity             = entity
-    self.Duration           = durTime
-    self.Events             = {}
-    self.Timescale          = 1
-    self.Repetitions        = 0
-    self.StartDelay         = 0
+    if not IsValid(entity) then
+        error("action entity must be valid", 2)
+    end
 
-    self.Playing            = false
-    self.ThinkName          = nil
-    self.ActionIndex        = table.insert( Action.ActionList, self )
-    self.LifeTime           = 0
+    duration = duration or 0
+    if not isnumber(duration) or duration < 0 then
+        error("action duration must be zero or greater", 2)
+    end
 
-    self.StartTime = 0
-    self.RepeatedFor = 0
-    self.PauseTime = nil
-    self.Removed = false
-
-    return self
+    local action = setmetatable({}, Action)
+    action.Entity = entity
+    action.Duration = duration
+    action.Events = {}
+    action.TimeScale = 1
+    action.Repetitions = 0
+    action.RepeatedFor = 0
+    action.StartDelay = 0
+    action.StartTime = 0
+    action.PauseTime = nil
+    action.Playing = false
+    action.Removed = false
+    action.Id = nextId()
+    action.HookName = "gebLib.Action." .. action.Id
+    return action
 end
 
-function Action:SetupThinking()
-    local thinkName = "gebLib.Action.Think_" .. self:GetIndex()
-    self.ThinkName = thinkName
-    --
-    self.StartTime = CurTime() + self.StartDelay
+function Action:Start(repetitions, delay)
+    if self.Removed or self.Playing or self.TimeScale <= 0 then return false end
+
+    self.Repetitions = repetitions or 0
+    self.StartDelay = delay or 0
+
+    if not isnumber(self.Repetitions) or self.Repetitions < -1 or self.Repetitions % 1 ~= 0 then
+        error("action repetitions must be -1 or a non-negative integer", 2)
+    end
+
+    if not isnumber(self.StartDelay) or self.StartDelay < 0 then
+        error("action delay must be zero or greater", 2)
+    end
+
     self.RepeatedFor = 0
-    hook.Add("Think", thinkName, function()
+    self.StartTime = CurTime() + self.StartDelay
+    self.PauseTime = nil
+    self.Playing = true
+    resetEvents(self)
+
+    if self.OnStartCallback then
+        self.OnStartCallback(self)
+        if self.Removed then return false end
+    end
+
+    hook.Add("Think", self.HookName, function()
         if self.Removed then return end
-        if not IsValid( self.Entity ) then self:Remove() return end
+        if not IsValid(self.Entity) then self:Remove() return end
         if not self.Playing then return end
 
-        for k, EventInfo in pairs( self.Events ) do
-            if not EventInfo.Played and CurTime() > self.StartTime + ( EventInfo.Timestamp / self.Timescale ) then
-                EventInfo.Function( self )
-                EventInfo.Played = true
+        local now = CurTime()
+        if now < self.StartTime then return end
+
+        for _, event in pairs(self.Events) do
+            if not event.played and now >= self.StartTime + event.time / self.TimeScale then
+                event.played = true
+                event.callback(self)
                 if self.Removed or not self.Playing then return end
             end
         end
 
-        -- Kill action when time comes
-        if CurTime() > ( self.StartTime + ( self.Duration / self.Timescale ) ) then
-            if ( self.Repetitions == -1 ) then -- Infinite loop
-                self.StartTime = CurTime() 
-                self.RepeatedFor = self.RepeatedFor + 1
-                self:ReloadEvents()
-                return 
-            end
+        if now < self.StartTime + self.Duration / self.TimeScale then return end
 
-            if self.RepeatedFor < self.Repetitions then -- Handle repetitions
-                self.StartTime = CurTime() 
-                self.RepeatedFor = self.RepeatedFor + 1
-                self:ReloadEvents() -- Reload all events so they can be played again
-            else
-                self:Stop()
-            end
+        if self.Repetitions == -1 or self.RepeatedFor < self.Repetitions then
+            self.RepeatedFor = self.RepeatedFor + 1
+            self.StartTime = now
+            resetEvents(self)
+            return
         end
+
+        self:Stop()
     end)
+
+    return true
 end
 
--- Action:Start() - Starts the action. Argument #1 - how many times action will repeat, #2 - after how many seconds action will begin
-function Action:Start( repetitions, delay )
-    if self.Removed or self:GetTimeScale() <= 0 then return end
-    
-    self.Playing = true
-    self.StartDelay = delay or 0
-    self.Repetitions = repetitions or 0  
-    self.PauseTime = nil
-    --
-    if self.FuncOnStart then
-        self.FuncOnStart( self )
-        if self.Removed then return end
-    end
-    --
-    self:SetupThinking()
-end
-
--- Action:Stop() - Stops and removes the action
-function Action:Stop()
-    self.Playing = false
-    self:Remove()
-end
-
--- Action:Pause() - Pauses the action
 function Action:Pause()
-    if not self.Playing or self.Removed then return end
-
+    if self.Removed or not self.Playing then return false end
     self.PauseTime = CurTime()
     self.Playing = false
+    return true
 end
 
--- Action:Resume() - Resumes the action
 function Action:Resume()
-    if self.Playing or self.Removed or not self.PauseTime then return end
-
-    self.StartTime = self.StartTime + ( CurTime() - self.PauseTime )
+    if self.Removed or self.Playing or not self.PauseTime then return false end
+    self.StartTime = self.StartTime + CurTime() - self.PauseTime
     self.PauseTime = nil
-
     self.Playing = true
+    return true
 end
 
--- Action:Remove() - Removes and stops the action
+function Action:Stop()
+    return self:Remove()
+end
+
 function Action:Remove()
-    if self.Removed then return end
+    if self.Removed then return false end
 
-    local actionId = self:GetIndex()
-    if self.ThinkName then
-        hook.Remove( "Think", self.ThinkName )
-    end
-
+    hook.Remove("Think", self.HookName)
     self.Playing = false
     self.Removed = true
-    --
-    if self.FuncOnRemove then
-        self.FuncOnRemove( self )
-    end
-    --
-    Action.ActionList[ actionId ] = nil
 
-    gebLib.PrintDebug( "Removed an Action " .. tostring( actionId ) )
-end
---
-function Action:SetTimeScale( timeScale ) self.Timescale = timeScale end
-function Action:GetTimeScale() return self.Timescale end
-function Action:IsPlaying() return self.Playing end
-function Action:GetIndex() return self.ActionIndex end
---
-function Action:SetInit( func )
-    self.Events[ "__event_Init" ] = { Timestamp = 0, Function = func, Played = false }
-end
-
-function Action:SetEnd( func )
-    self.Events[ "__event_End" ] = { Timestamp = self.Duration, Function = func, Played = false }
-end
-
-function Action:OnStart( func )
-    self.FuncOnStart = func
-end
-
-function Action:OnRemove( func )
-    self.FuncOnRemove = func
-end
-
-function Action:AddEvent( name, time, func )
-    if time > self.Duration then
-        error("Incorrect timestamp!")
+    if self.OnRemoveCallback then
+        self.OnRemoveCallback(self)
     end
 
-    self.Events[ name ] = { Timestamp = time, Function = func, Played = false }
+    return true
 end
 
-function Action:ReloadEvent( name )
-    if not self:HasEvents() then return end
-
-    if self:HasEvent( name ) then
-        self.Events[ name ].Played = false 
-    else
-        gebLib.PrintDebug( "Event: " .. tostring( name ) .. " cannot be reloaded because it does not exist!" )
+function Action:SetTimeScale(timeScale)
+    if not isnumber(timeScale) or timeScale <= 0 then
+        error("action time scale must be greater than zero", 2)
     end
+    self.TimeScale = timeScale
+end
+
+function Action:GetTimeScale()
+    return self.TimeScale
+end
+
+function Action:IsPlaying()
+    return self.Playing
+end
+
+function Action:GetIndex()
+    return self.Id
+end
+
+function Action:SetInit(callback)
+    self:AddEvent("__init", 0, callback)
+end
+
+function Action:SetEnd(callback)
+    self:AddEvent("__end", self.Duration, callback)
+end
+
+function Action:OnStart(callback)
+    if callback ~= nil and not isfunction(callback) then
+        error("action start callback must be a function", 2)
+    end
+    self.OnStartCallback = callback
+end
+
+function Action:OnRemove(callback)
+    if callback ~= nil and not isfunction(callback) then
+        error("action remove callback must be a function", 2)
+    end
+    self.OnRemoveCallback = callback
+end
+
+function Action:AddEvent(name, time, callback)
+    if not isstring(name) or name == "" then
+        error("action event name must be a non-empty string", 2)
+    end
+
+    if not isnumber(time) or time < 0 or time > self.Duration then
+        error("action event time must be within the action duration", 2)
+    end
+
+    if not isfunction(callback) then
+        error("action event callback must be a function", 2)
+    end
+
+    self.Events[name] = {time = time, callback = callback, played = false}
+end
+
+function Action:ReloadEvent(name)
+    local event = self.Events[name]
+    if event then event.played = false end
 end
 
 function Action:ReloadEvents()
-    if not self:HasEvents() then return end
-
-    for _, Event in pairs( self.Events ) do
-        Event.Played = false
-    end
-
-    gebLib.PrintDebug( "Action: " .. tostring( self:GetIndex() ) .. " has reloaded all events!" )
+    resetEvents(self)
 end
 
-function Action:HasEvent( name ) return self.Events[ name ] ~= nil end
-function Action:HasEvents() return not table.IsEmpty( self.Events ) end
---
+function Action:HasEvent(name)
+    return self.Events[name] ~= nil
+end
+
+function Action:HasEvents()
+    return next(self.Events) ~= nil
+end

@@ -214,7 +214,7 @@ local soundDecoders = {
 	end
 }
 
-function gebLib_SoundDuration(soundPath)
+function gebLib.SoundDuration(soundPath)
 	if soundCache[soundPath] ~= nil then
 		return soundCache[soundPath]
 	end

@@ -1,29 +1,24 @@
---This is the gebLib (originated from ba1.4) animation system
+gebLib.Animation = {}
+gebLib.Animation.__index = gebLib.Animation
 
-gebLib_animation = {}
-gebLib_animation.__index = gebLib_animation
-local nextAnimationId = 0
+local Animation = gebLib.Animation
+gebLib._NextAnimationId = gebLib._NextAnimationId or 0
 
---------------------
---Contributors: T0M
---------------------
-
---not sure if these todos are going to be done, because of how player handles animations
---TODO: Try and adapt the system, so it works with player animations
---TODO: Support layered sequences
-
---Constructor
-function gebLib_animation.New(entity, sequence)
+function Animation.New(entity, sequence)
     if not IsValid(entity) then
         error("Cannot create a gebLib animation for an invalid entity")
     end
 
-    if type(sequence) == "string" then
+    if isstring(sequence) then
         sequence = entity:LookupSequence(sequence)
     end
 
-    local self = setmetatable({}, gebLib_animation)
-    nextAnimationId = nextAnimationId + 1
+    if not isnumber(sequence) or sequence < 0 then
+        error("animation sequence must exist", 2)
+    end
+
+    local self = setmetatable({}, Animation)
+    gebLib._NextAnimationId = gebLib._NextAnimationId + 1
 
     self.Entity = entity
     self.Sequence = sequence
@@ -32,7 +27,7 @@ function gebLib_animation.New(entity, sequence)
     self.End = nil
     self.Events = {}
     self.ThinkName = nil
-    self.HookName = "gebLib.Animation." .. nextAnimationId
+    self.HookName = "gebLib.Animation." .. gebLib._NextAnimationId
     self.Initialized = false
     self.Playing = false
     self.Removed = false
@@ -60,10 +55,16 @@ function gebLib_animation.New(entity, sequence)
 end
 
 --Main Functions
-function gebLib_animation:Play()
+function Animation:Play(playback)
     if self:IsValid() then
         local entity = self.Entity
         local sequence = self.Sequence
+
+        playback = playback or entity:GetPlaybackRate()
+        if playback == 0 then playback = 1 end
+        if not isnumber(playback) then
+            error("animation playback must be a number", 2)
+        end
         
         self.Playing = true
         self.Initialized = false
@@ -75,7 +76,7 @@ function gebLib_animation:Play()
 
         hook.Add("Think", thinkName, function()
             if not IsValid(self.Entity) then self:Remove() return end
-            if self.Frames <= 0 or not self:IsValid() then
+            if self.Frames <= 0 or not self:IsValid() or not self:IsActive() then
                 self.Playing = false
                 hook.Remove("Think", thinkName)
                 return
@@ -99,14 +100,14 @@ function gebLib_animation:Play()
                 for _, event in pairs(self.Events) do
                     if self:GetPlayback() > 0 then
                         if self:GetFrame() >= event.Frame and not event.Played then
-                            event.Function(self)
                             event.Played = true
+                            event.Function(self)
                             if self.Removed or not self.Playing then return end
                         end
                     elseif self:GetPlayback() < 0 then
                         if self:GetFrame() <= event.Frame and not event.Played then
-                            event.Function(self)
                             event.Played = true
+                            event.Function(self)
                             if self.Removed or not self.Playing then return end
                         end
                     end
@@ -135,12 +136,16 @@ function gebLib_animation:Play()
         end)
         entity:ResetSequence(sequence)
         entity:ResetSequenceInfo()
-        entity:SetCycle(0)
+        entity:SetPlaybackRate(playback)
+        entity:SetCycle(playback < 0 and 1 or 0)
+        return true
     end
+
+    return false
 end
 
 --Sometimes we don't want to stop the stop the animation, so we pause it, so it still has the think function and can resume safely
-function gebLib_animation:Pause()
+function Animation:Pause()
     if self:IsValid() then
         self:SetPlayback(0)
         self.Playing = false
@@ -148,7 +153,7 @@ function gebLib_animation:Pause()
 end
 
 --Resuems the anim from the cycle, when the pause function was used
-function gebLib_animation:Resume(playback)
+function Animation:Resume(playback)
     playback = playback or 1
     if self:IsValid() then
         self:SetPlayback(playback)
@@ -156,12 +161,12 @@ function gebLib_animation:Resume(playback)
     end
 end
 
-function gebLib_animation:Stop()
+function Animation:Stop()
     if self.ThinkName then
         hook.Remove("Think", self.ThinkName)
     end
 
-    if self:IsValid() then
+    if self:IsActive() then
         self.Entity:ResetSequenceInfo()
         self:SetPlayback(0)
         self:SetCycle(0)
@@ -171,7 +176,7 @@ function gebLib_animation:Stop()
     self.Initialized = false
 end
 
-function gebLib_animation:Remove() --Use this when you are not going to use the animation again, should be added to ENT:OnRemove()
+function Animation:Remove()
     if self.Removed then return end
 
     self:Stop()
@@ -181,12 +186,24 @@ function gebLib_animation:Remove() --Use this when you are not going to use the 
 end
 
 --Event functions
-function gebLib_animation:AddEvent(name, frame, func)
+function Animation:AddEvent(name, frame, func)
+    if not isstring(name) or name == "" then
+        error("animation event name must be a non-empty string", 2)
+    end
+
+    if not isnumber(frame) or frame < 0 then
+        error("animation event frame must be zero or greater", 2)
+    end
+
+    if not isfunction(func) then
+        error("animation event callback must be a function", 2)
+    end
+
     self.Events[name] = {Frame = frame, Function = func, Played = false}
     gebLib.PrintDebug("Successfully added an event on " .. tostring(frame) .. ". frame!")
 end
 
-function gebLib_animation:ReloadEvent(name)
+function Animation:ReloadEvent(name)
     if not self:HasEvents() then return end
 
     if self:HasEvent(name) then
@@ -196,7 +213,7 @@ function gebLib_animation:ReloadEvent(name)
     end
 end
 
-function gebLib_animation:ReloadEvents()
+function Animation:ReloadEvents()
     if not self:HasEvents() then return end
 
     for _, event in pairs(self.Events) do
@@ -206,47 +223,49 @@ function gebLib_animation:ReloadEvents()
     gebLib.PrintDebug("Sequence: " .. tostring(self.Sequence) .. " has reloaded all events!")
 end
 
-function gebLib_animation:HasEvent(name)
+function Animation:HasEvent(name)
     return self.Events[name] ~= nil
 end
 
-function gebLib_animation:HasEvents()
-    return not table.IsEmpty(self.Events)
+function Animation:HasEvents()
+    return next(self.Events) ~= nil
 end
 
-function gebLib_animation:IsValid()
+function Animation:IsValid()
     return not self.Removed and IsValid(self.Entity) and self.Sequence ~= -1
 end
 
-function gebLib_animation:IsActive()
+function Animation:IsActive()
     return self:IsValid() and self.Entity:GetSequence() == self.Sequence
 end
 
-function gebLib_animation:IsPlaying()
+function Animation:IsPlaying()
     if self:IsValid() and self:IsActive() then
         return self.Playing
     end
     return false
 end
 
-function gebLib_animation:IsFinished()
+function Animation:IsFinished()
     if self:IsActive() then
         if self:GetPlayback() > 0 then
             return self:GetCycle() >= 1
-        else
+        elseif self:GetPlayback() < 0 then
             return self:GetCycle() <= 0
         end
+
+        return false
     else
         return false
     end
 end
 
-function gebLib_animation:CycleToFrame(cycle)
+function Animation:CycleToFrame(cycle)
     cycle = math.Clamp(cycle, 0, 1)
     return cycle * self:GetFrames()
 end
 
-function gebLib_animation:Print()
+function Animation:Print()
     print("Entity: " .. tostring(self.Entity))
     print("Sequence ID: " .. tostring(self.Sequence))
     print("Sequence Name: " .. self.Entity:GetSequenceName(self.Sequence))
@@ -266,46 +285,54 @@ function gebLib_animation:Print()
 end
 
 --Setters & Getters
-function gebLib_animation:SetInit(func)
+function Animation:SetInit(func)
+    if func ~= nil and not isfunction(func) then
+        error("animation init callback must be a function", 2)
+    end
     self.Init = func
 end
 
-function gebLib_animation:SetEnd(func)
+function Animation:SetEnd(func)
+    if func ~= nil and not isfunction(func) then
+        error("animation end callback must be a function", 2)
+    end
     self.End = func
 end
 
-function gebLib_animation:SetPlayback(rate)
+function Animation:SetPlayback(rate)
     self.Entity:SetPlaybackRate(rate)
 end
 
-function gebLib_animation:GetPlayback()
+function Animation:GetPlayback()
     return self.Entity:GetPlaybackRate()
 end
 
-function gebLib_animation:SetCycle(cycle)
+function Animation:SetCycle(cycle)
     cycle = math.Clamp(cycle, 0, 1)
     self.Entity:SetCycle(cycle)
 end
 
-function gebLib_animation:GetCycle()
+function Animation:GetCycle()
     return self.Entity:GetCycle()
 end
 
-function gebLib_animation:SetFrames(frames)
+function Animation:SetFrames(frames)
+    if not isnumber(frames) or frames < 0 then
+        error("animation frame count must be zero or greater", 2)
+    end
     self.Frames = frames
 end
 
-function gebLib_animation:GetFrames() --Cycle is not the same thing as frame, cycle is a num from 0 to 1 representing the percentage
+function Animation:GetFrames()
     return self.Frames
 end
 
-function gebLib_animation:SetFrame(frame) --Internally sets the cycle. SetCycle is faster, but if you want to use it, you can.
+function Animation:SetFrame(frame)
     if self:IsValid() and self:GetFrames() > 0 then
         self.Entity:SetCycle(math.Clamp(frame / self:GetFrames(), 0, 1))
     end
 end
 
-function gebLib_animation:GetFrame() --Returns current frame of sequence
-    --Example: sequence has 40 frames and the current cycle is 0.5 (middle of the animation), so we multiply 0.5 * 40 = 20 frames // makes sense
+function Animation:GetFrame()
     return self:GetCycle() * self:GetFrames()
 end
