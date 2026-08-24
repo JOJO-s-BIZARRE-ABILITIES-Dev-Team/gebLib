@@ -44,6 +44,14 @@ local ANTLION_DEBRIS_MODELS = {
     "models/gibs/antlion_gib_small_3.mdl",
 }
 
+if util and util.PrecacheModel then
+    local modelSets = {ROCK_DEBRIS_MODELS, METAL_DEBRIS_MODELS, ANTLION_DEBRIS_MODELS}
+    for setIndex = 1, #modelSets do
+        local models = modelSets[setIndex]
+        for modelIndex = 1, #models do util.PrecacheModel(models[modelIndex]) end
+    end
+end
+
 local surfaceMaterials = {}
 local impactTrace = {}
 local impactTraceData = {
@@ -468,7 +476,7 @@ function Visuals.CreateDebrisBurst(materialPath, position, count, options)
     return emitted
 end
 
-function Visuals.CreateDebris(modelPath, clientProp, lifetime, ignoreLimit)
+function Visuals.CreateDebris(modelPath, clientProp, lifetime, ignoreLimit, animateGrowth)
     local limit = math.max(math.floor(tonumber(Visuals.MaxDebris) or 512), 0)
     if limit == 0 then return NULL end
 
@@ -511,7 +519,7 @@ function Visuals.CreateDebris(modelPath, clientProp, lifetime, ignoreLimit)
     end
     entity:CallOnRemove("gebLib.Visuals.Debris", debrisRemoved)
 
-    if not clientProp then
+    if not clientProp and animateGrowth ~= false then
         local desiredScale = entity:GetModelScale()
         entity:SetModelScale(0, 0)
         entity:SetModelScale(desiredScale, GROW_TIME)
@@ -742,7 +750,7 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
 
                 if keep then
                     local modelCreateStartedAt = profiling and profileClock()
-                    local entity = Visuals.CreateDebris(modelPath, false, staticLifetime, preserveCount)
+                    local entity = Visuals.CreateDebris(modelPath, false, staticLifetime, preserveCount, false)
                     if profiling then recordDuration(impactStats, "modelCreateTime", modelCreateStartedAt) end
 
                     if IsValid(entity) then
