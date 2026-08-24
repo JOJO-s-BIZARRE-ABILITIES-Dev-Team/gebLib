@@ -10,9 +10,6 @@ A named, reusable description of status-effect callbacks and tick timing.
 **Applied Status Effect**:
 The duration, level, source, and timing state of one Status Effect Definition on one living entity.
 
-**Scheduled Action**:
-One entity-owned callback that runs after a cancellable, pausable, time-scaled delay.
-
 **Cinematic Camera**:
 A player-focused frame timeline that controls view presentation.
 
@@ -23,7 +20,7 @@ A client-only debris model or decal with a finite lifetime.
 A controllable Transient Visual that emits ordered debris steps over time from one shared frame scheduler.
 
 **Frame Dispatcher**:
-The internal mutation-safe frame loop shared by independently owned Scheduled Actions, Cinematic Cameras, and Debris Waves.
+The internal mutation-safe frame loop shared by independently owned Cinematic Cameras and Debris Waves.
 
 **Transient Visual Plan**:
 An owned, normalized set of settings prepared once before a Transient Visual is emitted.
@@ -44,7 +41,6 @@ Opt-in observations about packet and record size, frequency, recipients, repeate
 
 - A **Status Effect Definition** may produce one **Applied Status Effect** per living entity.
 - An **Applied Status Effect** belongs to exactly one living entity.
-- A **Scheduled Action** belongs to exactly one entity and completes, cancels, or pauses independently.
 - A **Cinematic Camera** owns its lifecycle independently.
 - A **Transient Visual** exists only on the client that creates it.
 - A **Debris Wave** owns its emission progress and may be paused, resumed, or cancelled independently.
@@ -63,4 +59,4 @@ Opt-in observations about packet and record size, frequency, recipients, repeate
 ## Flagged ambiguities
 
 - "Effect" previously meant both the reusable definition and its mutable runtime copy. Use **Status Effect Definition** and **Applied Status Effect**.
-- A player gesture in slot 1 is an action animation, not a Scheduled Action.
+- A player gesture in slot 1 is called an action animation.

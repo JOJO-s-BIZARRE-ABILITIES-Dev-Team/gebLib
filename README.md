@@ -1,12 +1,12 @@
 # gebLib 3
 
-gebLib is a small Garry's Mod Lua library for status effects, scheduled gameplay work, player animation layers, cinematic cameras, and a few focused helpers.
+gebLib is a small Garry's Mod Lua library for status effects, player animation layers, cinematic cameras, transient visuals, networking, and a few focused helpers.
 
 ## Loading and dependencies
 
 The stable bootstrap filename remains `lua/autorun/000_geblib_v2.lua` for upgrade compatibility. Its numeric prefix makes the shared bootstrap run early in Garry's Mod's alphabetically sorted autorun phase; this is not an addon-level priority system.
 
-Scheduled Actions, Cinematic Cameras, and Debris Waves share one internal frame dispatcher. Each still owns its lifecycle and cleanup rules independently.
+Cinematic Cameras and Debris Waves share one internal frame dispatcher. Each still owns its lifecycle and cleanup rules independently.
 
 Code in `autorun/server`, `autorun/client`, the active gamemode, weapons, entities, and effects loads after the shared autorun phase and can use gebLib directly.
 
@@ -220,22 +220,6 @@ Registration copies and owns the Status Effect Definition. `gebLib_GetStatusEffe
 
 Status effects are not automatically networked. Apply gameplay effects on the server. Send only the state a client UI actually needs.
 
-## Scheduled actions
-
-```lua
-local action = gebLib.ScheduledAction.After(player, 0.5, function()
-    if IsValid(player) then player:TakeDamage(20) end
-end)
-
-action:SetTimeScale(2) -- Completes twice as quickly.
-```
-
-A Scheduled Action runs one callback after its delay. Its entity owner must remain valid, otherwise the action cancels without running the callback.
-
-`Cancel`, `Pause`, and `Resume` return whether they changed the action. `SetTimeScale` changes how quickly the remaining delay advances, and `IsPending` includes paused actions. Completed and cancelled actions cannot be restarted.
-
-Internally, Scheduled Actions use the shared frame dispatcher rather than installing one hook per action. Callback failures are reported and contained after the action has completed.
-
 ## Player animation layers
 
 ```lua
@@ -373,8 +357,6 @@ end)
 
 ## Breaking changes from v1
 
-- `gebLib.Action.Create` is now `gebLib.Action.New`.
-- `gebLib_animation` is now `gebLib.Animation`.
 - `gebLib_Camera` is now `gebLib.Camera`.
 - `gebLib_SoundDuration` is now `gebLib.SoundDuration`.
 - `gebLib_statuseffects.New` and `entity:gebLib_AddStatusEffect` are replaced by `gebLib.StatusEffects.Register` and `entity:gebLib_ApplyStatusEffect`.
@@ -387,9 +369,7 @@ end)
 
 ## Breaking changes from v2
 
-- The broad `gebLib.Action` event timeline was replaced by `gebLib.ScheduledAction.After(owner, delay, callback)`.
-- The unused standalone `gebLib.Animation` sequence controller was removed. Use player animation layers for networked player gestures or Garry's Mod sequence functions for entity-specific control.
-- Scheduled Action handles use `Cancel` instead of `Stop` or `Remove`. They retain pause, resume, time scaling, and entity-owner cancellation.
+- The broad `gebLib.Action` timeline and standalone `gebLib.Animation` sequence controller were removed. Use Garry's Mod timers for delayed work, player animation layers for networked gestures, or Garry's Mod sequence functions for entity-specific control.
 
 ## Behavioral hardening in 2.1
 
@@ -407,7 +387,6 @@ lua tests/bootstrap_test.lua
 lua tests/net_test.lua
 lua tests/network_features_test.lua
 lua tests/status_effects_test.lua
-lua tests/action_test.lua
 lua tests/visuals_test.lua
 ```
 

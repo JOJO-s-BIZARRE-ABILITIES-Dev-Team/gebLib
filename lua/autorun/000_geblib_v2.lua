@@ -1,7 +1,7 @@
 -- Developed by T0M and jopster1336
 
 gebLib = gebLib or {}
-gebLib.Version = "3.0.0"
+gebLib.Version = "3.0.1"
 gebLib.Loaded = false
 
 if game and game.AddParticles then game.AddParticles("particles/geblib_debris.pcf") end
@@ -28,7 +28,6 @@ local sharedFiles = {
     "geblib/net_profile.lua",
     "geblib/net.lua",
     "geblib/entities.lua",
-    "geblib/scheduled_action.lua",
     "geblib/camera.lua",
     "geblib/status_effects.lua",
     "geblib/chat.lua",
