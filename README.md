@@ -303,7 +303,7 @@ local duration = gebLib.SoundDuration("sound/example.mp3")
 
 Debris is client-only and capped at 512 active entities by default. Creating another removes the debris that would expire next. Change `gebLib.Visuals.MaxDebris` before creating debris when a feature needs a different budget.
 
-`CreateDebris` uses one shared expiry scheduler instead of a per-frame scan. Render-only `ClientsideModel` debris grows through engine interpolation. Physical client props skip animated scaling to avoid client trace errors. All debris fades during its final second.
+`CreateDebris` uses one shared event scheduler instead of a per-frame scan. Full-opacity debris stays on the engine draw path, then enters Lua only for its final one-second fade. Render-only `ClientsideModel` debris grows through engine interpolation. Physical client props skip animated scaling to avoid client trace errors.
 
 ```lua
 print(gebLib.Visuals.GetDebrisCount())
@@ -363,4 +363,4 @@ All shipped Lua files use Lua 5.1-compatible syntax. They are checked with LuaJI
 
 Run the optional local CPU benchmark with `lua tests/net_benchmark.lua` or `luajit tests/net_benchmark.lua`. It compares schema sends against equivalent direct `net` calls in a Lua mock. It is useful for tracking wrapper overhead, but only an in-game benchmark can measure Source networking and real addon traffic.
 
-Run `lua tests/visuals_benchmark.lua` or `luajit tests/visuals_benchmark.lua` to measure debris creation and idle-frame overhead. It does not measure engine rendering or physics cost.
+Run `lua tests/visuals_benchmark.lua` or `luajit tests/visuals_benchmark.lua` to measure debris creation, idle overhead, full-opacity Lua render callbacks, fade scheduling, and expiry. It does not measure engine rendering or physics cost.

@@ -87,8 +87,13 @@ do
     assertEqual(debris.scaleCalls[1].duration, 0, "growth start is immediate")
     assertEqual(debris.scaleCalls[2].scale, 1.5, "growth target scale")
     assertEqual(debris.scaleCalls[2].duration, 0.25, "growth transition duration")
-    assertNear(scheduledTimers[timerName].delay, 5, 0.0001, "expiry timer")
+    assertNear(scheduledTimers[timerName].delay, 4, 0.0001, "fade timer")
+    assertEqual(debris.RenderOverride, nil, "full-opacity debris should stay on the engine draw path")
 
+    now = 4
+    scheduledTimers[timerName].callback()
+    assertEqual(type(debris.RenderOverride), "function", "fade should install the render override")
+    assertNear(scheduledTimers[timerName].delay, 1, 0.0001, "expiry timer after fade starts")
     debris.RenderOverride(debris)
     assertEqual(debris.drawCount, 1, "full-opacity draw")
     assertEqual(#blendCalls, 0, "full-opacity draws should not touch global blend")
@@ -110,14 +115,21 @@ do
     local long = Visuals.CreateDebris("long", false, 10)
     local short = Visuals.CreateDebris("short", true, 2)
     assertEqual(#short.scaleCalls, 0, "physical client props should not animate their scale")
-    assertNear(scheduledTimers[timerName].delay, 2, 0.0001, "earliest expiry should lead the heap")
+    assertNear(scheduledTimers[timerName].delay, 1, 0.0001, "earliest fade should lead the heap")
+
+    now = 11
+    scheduledTimers[timerName].callback()
+    assertEqual(IsValid(short), true, "fade start should retain debris")
+    assertEqual(type(short.RenderOverride), "function", "fade start should install rendering")
+    assertEqual(Visuals.GetDebrisCount(), 2, "fade start should retain the active count")
+    assertNear(scheduledTimers[timerName].delay, 1, 0.0001, "fading debris expiry")
 
     now = 12
     scheduledTimers[timerName].callback()
     assertEqual(IsValid(short), false, "due debris should expire")
     assertEqual(IsValid(long), true, "later debris should remain")
     assertEqual(Visuals.GetDebrisCount(), 1, "expiry should update the active count")
-    assertNear(scheduledTimers[timerName].delay, 8, 0.0001, "next expiry should be scheduled")
+    assertNear(scheduledTimers[timerName].delay, 7, 0.0001, "next fade should be scheduled")
 
     long:Remove()
     assertEqual(Visuals.GetDebrisCount(), 0, "external removal should unregister debris")

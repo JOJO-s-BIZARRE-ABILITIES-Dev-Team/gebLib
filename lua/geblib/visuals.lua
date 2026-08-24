@@ -18,9 +18,10 @@ end
 Visuals.ActiveDebris = {}
 Visuals.MaxDebris = Visuals.MaxDebris or 512
 local debrisHeap = Visuals.ActiveDebris
+local scheduledAt
 
-local function expiresAt(entity)
-    return entity.gebLib_DebrisExpiresAt or math.huge
+local function eventAt(entity)
+    return entity.gebLib_DebrisEventAt or math.huge
 end
 
 local function swap(left, right)
@@ -35,7 +36,7 @@ end
 local function siftUp(index)
     while index > 1 do
         local parent = math.floor(index / 2)
-        if expiresAt(debrisHeap[parent]) <= expiresAt(debrisHeap[index]) then return end
+        if eventAt(debrisHeap[parent]) <= eventAt(debrisHeap[index]) then return end
         swap(parent, index)
         index = parent
     end
@@ -50,11 +51,11 @@ local function siftDown(index)
 
         local smallest = left
         local right = left + 1
-        if right <= count and expiresAt(debrisHeap[right]) < expiresAt(debrisHeap[left]) then
+        if right <= count and eventAt(debrisHeap[right]) < eventAt(debrisHeap[left]) then
             smallest = right
         end
 
-        if expiresAt(debrisHeap[index]) <= expiresAt(debrisHeap[smallest]) then return end
+        if eventAt(debrisHeap[index]) <= eventAt(debrisHeap[smallest]) then return end
         swap(index, smallest)
         index = smallest
     end
@@ -81,7 +82,7 @@ local function removeAt(index)
         last.gebLib_DebrisHeapIndex = index
 
         local parent = math.floor(index / 2)
-        if index > 1 and expiresAt(last) < expiresAt(debrisHeap[parent]) then
+        if index > 1 and eventAt(last) < eventAt(debrisHeap[parent]) then
             siftUp(index)
         else
             siftDown(index)
@@ -91,31 +92,48 @@ local function removeAt(index)
     return removed
 end
 
-local expireDueDebris
+local drawDebris
+local processDueDebris
 
-local function scheduleNextExpiry()
-    timer.Remove(DEBRIS_TIMER)
-
+local function scheduleNextEvent()
     local entity = debrisHeap[1]
-    if not entity then return end
+    if not entity then
+        timer.Remove(DEBRIS_TIMER)
+        scheduledAt = nil
+        return
+    end
 
-    timer.Create(DEBRIS_TIMER, math.max(expiresAt(entity) - CurTime(), 0), 1, expireDueDebris)
+    local nextAt = eventAt(entity)
+    if scheduledAt == nextAt then return end
+
+    scheduledAt = nextAt
+    timer.Create(DEBRIS_TIMER, math.max(nextAt - CurTime(), 0), 1, processDueDebris)
 end
 
-expireDueDebris = function()
+processDueDebris = function()
+    scheduledAt = nil
     local now = CurTime()
     local entity = debrisHeap[1]
 
-    while entity and (not IsValid(entity) or now >= expiresAt(entity)) do
-        entity = removeAt(1)
-        if IsValid(entity) then
-            entity.gebLib_DebrisExpiresAt = nil
-            entity:Remove()
+    while entity and (not IsValid(entity) or now >= eventAt(entity)) do
+        if IsValid(entity) and entity.gebLib_DebrisFadePending then
+            entity.gebLib_DebrisFadePending = nil
+            entity.gebLib_DebrisEventAt = entity.gebLib_DebrisExpiresAt
+            entity.RenderOverride = drawDebris
+            siftDown(1)
+        else
+            entity = removeAt(1)
+            if IsValid(entity) then
+                entity.gebLib_DebrisEventAt = nil
+                entity.gebLib_DebrisExpiresAt = nil
+                entity.RenderOverride = nil
+                entity:Remove()
+            end
         end
         entity = debrisHeap[1]
     end
 
-    scheduleNextExpiry()
+    scheduleNextEvent()
 end
 
 local function debrisRemoved(entity)
@@ -124,11 +142,13 @@ local function debrisRemoved(entity)
 
     local wasFirst = index == 1
     removeAt(index)
+    entity.gebLib_DebrisEventAt = nil
     entity.gebLib_DebrisExpiresAt = nil
-    if wasFirst then scheduleNextExpiry() end
+    entity.gebLib_DebrisFadePending = nil
+    if wasFirst then scheduleNextEvent() end
 end
 
-local function drawDebris(entity)
+drawDebris = function(entity)
     local expiry = entity.gebLib_DebrisExpiresAt
     if not expiry then
         entity:DrawModel()
@@ -165,8 +185,15 @@ function Visuals.CreateDebris(modelPath, clientProp, lifetime)
     if not isnumber(lifetime) then lifetime = 10 end
     lifetime = math.max(lifetime, 0)
 
-    entity.gebLib_DebrisExpiresAt = CurTime() + lifetime
-    entity.RenderOverride = drawDebris
+    local expiry = CurTime() + lifetime
+    entity.gebLib_DebrisExpiresAt = expiry
+    if lifetime > 1 then
+        entity.gebLib_DebrisEventAt = expiry - 1
+        entity.gebLib_DebrisFadePending = true
+    else
+        entity.gebLib_DebrisEventAt = expiry
+        entity.RenderOverride = drawDebris
+    end
     entity:CallOnRemove("gebLib.Visuals.Debris", debrisRemoved)
 
     if not clientProp then
@@ -177,7 +204,7 @@ function Visuals.CreateDebris(modelPath, clientProp, lifetime)
 
     local previousFirst = debrisHeap[1]
     pushDebris(entity)
-    if debrisHeap[1] ~= previousFirst then scheduleNextExpiry() end
+    if debrisHeap[1] ~= previousFirst then scheduleNextEvent() end
     return entity
 end
 
@@ -192,12 +219,16 @@ end
 
 function Visuals.ClearDebris()
     timer.Remove(DEBRIS_TIMER)
+    scheduledAt = nil
 
     for index = #debrisHeap, 1, -1 do
         local entity = debrisHeap[index]
         debrisHeap[index] = nil
         entity.gebLib_DebrisHeapIndex = nil
+        entity.gebLib_DebrisEventAt = nil
         entity.gebLib_DebrisExpiresAt = nil
+        entity.gebLib_DebrisFadePending = nil
+        entity.RenderOverride = nil
         if IsValid(entity) then entity:Remove() end
     end
 end
