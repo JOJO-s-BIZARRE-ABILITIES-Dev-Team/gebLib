@@ -9,8 +9,15 @@ local insert = table.insert
 local IsValid = IsValid
 
 ------------------------------
+-- TODO: Srlion wants everyone to use the official workshop hook library instead of this
+-- DEPRECATED: This is a modified version of the original hook library, it is not recommended to use this anymore. It is also very outdated and not supported anymore,
+-- Use the official workshop hook library instead: 
+-- https://steamcommunity.com/sharedfiles/filedetails/?id=1907060869
+-- Once someone gets to it, please update it, I don't want to break shit right now and its getting late :-)
+
+
 -- THANKS TO SRLION FOR MAKING THIS LIBRARY
--- https:--github.com/Srlion/Hook-Library
+-- https://github.com/Srlion/Hook-Library
 
 -- I just do this so glua-lint doesn't rage at me
 do
