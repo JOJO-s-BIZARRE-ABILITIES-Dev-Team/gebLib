@@ -91,7 +91,11 @@ function Entity:gebLib_FindEmptyPosition(position, distance, step, filter)
     distance = distance or 128
     step = step or 16
 
-    if step <= 0 then
+    if not isnumber(distance) or distance < 0 then
+        error("position search distance must be zero or greater", 2)
+    end
+
+    if not isnumber(step) or step <= 0 then
         error("position search step must be greater than zero", 2)
     end
 
@@ -138,13 +142,19 @@ end
 function Entity:gebLib_Dissolve(delay)
     if CLIENT or not IsValid(self) then return nil end
 
+    delay = delay or 0
+    if not isnumber(delay) or delay < 0 then
+        error("dissolve delay must be zero or greater", 2)
+    end
+
     local dissolver = ents.Create("env_entity_dissolver")
     if not IsValid(dissolver) then return nil end
 
     dissolver:SetOwner(self)
     dissolver:Spawn()
     dissolver:SetSaveValue("dissolvetype", 0)
-    dissolver:Fire("Dissolve", "!activator", delay or 0, self)
+    dissolver:Fire("Dissolve", "!activator", delay, self)
+    SafeRemoveEntityDelayed(dissolver, delay + 1)
 
     return dissolver
 end

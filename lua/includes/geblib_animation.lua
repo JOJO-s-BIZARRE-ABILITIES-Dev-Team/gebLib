@@ -144,21 +144,29 @@ function Animation:Play(playback)
     return false
 end
 
---Sometimes we don't want to stop the stop the animation, so we pause it, so it still has the think function and can resume safely
 function Animation:Pause()
-    if self:IsValid() then
+    if self:IsActive() then
         self:SetPlayback(0)
         self.Playing = false
+        return true
     end
+
+    return false
 end
 
---Resuems the anim from the cycle, when the pause function was used
 function Animation:Resume(playback)
     playback = playback or 1
-    if self:IsValid() then
+    if not isnumber(playback) then
+        error("animation playback must be a number", 2)
+    end
+
+    if self:IsActive() then
         self:SetPlayback(playback)
         self.Playing = true
+        return true
     end
+
+    return false
 end
 
 function Animation:Stop()

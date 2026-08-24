@@ -60,7 +60,7 @@ local function validSlot(slot)
 end
 
 function Player:gebLib_PlaySequence(slot, sequence, cycle, autokill, playback)
-    if not validSlot(slot) or not shouldApplyPredicted(self) then return false end
+    if not IsValid(self) or not validSlot(slot) or not shouldApplyPredicted(self) then return false end
 
     sequence = resolveSequence(self, sequence)
     if not sequence then return false end
@@ -70,6 +70,7 @@ function Player:gebLib_PlaySequence(slot, sequence, cycle, autokill, playback)
     if autokill == nil then autokill = true end
 
     if not isnumber(cycle) or not isnumber(playback) then return false end
+    cycle = math.Clamp(cycle, 0, 1)
 
     applyPlay(self, slot, sequence, cycle, autokill, playback)
     send(self, PLAY, slot, sequence, cycle, autokill, playback)
@@ -77,21 +78,21 @@ function Player:gebLib_PlaySequence(slot, sequence, cycle, autokill, playback)
 end
 
 function Player:gebLib_StopSequence(slot)
-    if not validSlot(slot) or not shouldApplyPredicted(self) then return false end
+    if not IsValid(self) or not validSlot(slot) or not shouldApplyPredicted(self) then return false end
     applyStop(self, slot)
     send(self, STOP, slot)
     return true
 end
 
 function Player:gebLib_PauseSequence(slot)
-    if not validSlot(slot) or not shouldApplyPredicted(self) then return false end
+    if not IsValid(self) or not validSlot(slot) or not shouldApplyPredicted(self) then return false end
     self:SetLayerPlaybackRate(slot, 0)
     send(self, PAUSE, slot)
     return true
 end
 
 function Player:gebLib_ResumeSequence(slot, playback)
-    if not validSlot(slot) or not shouldApplyPredicted(self) then return false end
+    if not IsValid(self) or not validSlot(slot) or not shouldApplyPredicted(self) then return false end
     playback = playback or 1
     if not isnumber(playback) then return false end
     self:SetLayerPlaybackRate(slot, playback)

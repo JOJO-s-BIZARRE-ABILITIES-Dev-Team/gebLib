@@ -16,7 +16,7 @@ end
 
 --Constructor
 function Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHooks)
-	if not IsValid(ply) then
+	if not IsValid(ply) or not ply:IsPlayer() then
 		error("Cannot create a gebLib camera for an invalid player")
 	end
 
@@ -30,6 +30,7 @@ function Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHooks)
 		error("camera max frames must be a number", 2)
 	end
 	if maxFrames and maxFrames < 0 then maxFrames = nil end
+	name = tostring(name or "camera")
 	
     local self = setmetatable({}, Camera)
     gebLib._NextCameraId = gebLib._NextCameraId + 1
@@ -57,6 +58,7 @@ function Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHooks)
 
 	self.OldPos = nil
 	self.OldAng = nil
+	self.OriginalNoDraw = nil
 
     self.LastPos = vector_origin
     self.LastAng = angle_zero
@@ -66,7 +68,7 @@ end
 
 --General Functions
 function Camera:Play(simulate)
-    if self.Playing or not IsValid(self.Player) then return end
+    if self.Playing or not self:IsValid() then return false end
 
 	local maxFrames = self.MaxFrames
 	if maxFrames == nil then
@@ -102,6 +104,8 @@ function Camera:Play(simulate)
 
 	if SERVER then
 		hook.Add("Think", self.ThinkName, function()
+			if not self:IsValid() then self:Stop() return end
+
 			self.CurFrame = (SysTime() - self.Start) * self.FPS
 
 			if self.ThinkFunc and self.Playing then
@@ -113,7 +117,7 @@ function Camera:Play(simulate)
             end
 		end)
 
-		return
+		return true
 	end
     
     if not simulate then
@@ -178,16 +182,19 @@ function Camera:Play(simulate)
             end
         end)
     end
+
+	return true
 end
 
 function Camera:Stop()
-    if not self.Playing then return end
+    if not self.Playing then return false end
 
 	self.Playing = false
 	self:RemoveDefaultHooks()
 
-	if IsValid(self.Player) then
-		self.Player:SetNoDraw(false)
+	if CLIENT and IsValid(self.Player) and self.OriginalNoDraw ~= nil then
+		self.Player:SetNoDraw(self.OriginalNoDraw)
+		self.OriginalNoDraw = nil
 	end
 	if CLIENT and IsValid(self.Copy) then
 		self.Copy:Remove()
@@ -196,13 +203,21 @@ function Camera:Stop()
 	if self.EndFunc then
 		self.EndFunc(self)
 	end
+
+	return true
 end
 
 function Camera:SetThink(func)
+	if func ~= nil and not isfunction(func) then
+		error("camera think callback must be a function", 2)
+	end
     self.ThinkFunc = func
 end
 
 function Camera:SetEnd(func)
+	if func ~= nil and not isfunction(func) then
+		error("camera end callback must be a function", 2)
+	end
     self.EndFunc = func
 end
 
@@ -235,6 +250,8 @@ function Camera:AddEvent(initFrame, endFrame, func)
 end
 
 function Camera:AddFakePlayerCopy()
+	if not CLIENT then return false end
+
 	local ply = self.Player
     
     local angles = ply:GetAimVector():Angle()
@@ -247,15 +264,17 @@ function Camera:AddFakePlayerCopy()
 	self.OldAng = angles
 
 	local copy = ClientsideModel(ply:GetModel())
+	if not IsValid(copy) then return false end
+
     copy:SetPos(oldPos)
     copy:SetAngles(angles)
 	copy:DrawShadow(true)
     copy:SetSkin(ply:GetSkin())
     copy:SetPlaybackRate(1)
-	copy:SetBodygroup(1, 1)
 	copy:SetSequence(ply:GetSequence())
 	copy.RenderOverride = RenderOverride
 	self.Copy = copy
+	return true
 end
 
 function Camera:AddDefaultHooks()
@@ -291,7 +310,13 @@ function Camera:AddDefaultHooks()
 
 		if not self:IsValid() then self:Stop() return end
 
-		owner:SetNoDraw(IsValid(self.Copy))
+		if IsValid(self.Copy) then
+			if self.OriginalNoDraw == nil then
+				self.OriginalNoDraw = owner:GetNoDraw()
+			end
+
+			owner:SetNoDraw(true)
+		end
 		if self.OldAng then owner:SetEyeAngles(self.OldAng) end
 		if self.OldPos then owner:SetPos(self.OldPos) end
 	end)
