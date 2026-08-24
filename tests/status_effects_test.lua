@@ -63,7 +63,7 @@ SERVER = true
 CLIENT = false
 gebLib = {}
 
-dofile("lua/includes/geblib_status_effects.lua")
+dofile("lua/geblib/status_effects.lua")
 
 do
     local events = {}

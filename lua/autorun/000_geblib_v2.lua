@@ -2,6 +2,7 @@
 
 gebLib = gebLib or {}
 gebLib.Version = "2.0.0"
+gebLib.Loaded = false
 
 CreateConVar(
     "geblib_developer_debugmode",
@@ -20,19 +21,19 @@ function gebLib.PrintDebug(...)
 end
 
 local sharedFiles = {
-    "includes/geblib_entities.lua",
-    "includes/geblib_action.lua",
-    "includes/geblib_animation.lua",
-    "includes/geblib_camera.lua",
-    "includes/geblib_status_effects.lua",
-    "includes/geblib_chat.lua",
-    "includes/geblib_player_animation.lua",
-    "includes/geblib_sound.lua",
+    "geblib/entities.lua",
+    "geblib/action.lua",
+    "geblib/animation.lua",
+    "geblib/camera.lua",
+    "geblib/status_effects.lua",
+    "geblib/chat.lua",
+    "geblib/player_animation.lua",
+    "geblib/sound.lua",
 }
 
 local clientFiles = {
-    "includes/geblib_drawing.lua",
-    "includes/geblib_visuals.lua",
+    "geblib/drawing.lua",
+    "geblib/visuals.lua",
 }
 
 if SERVER then
@@ -85,3 +86,6 @@ else
         hook.Run("gebLib.PlayerFullyConnected", LocalPlayer())
     end)
 end
+
+gebLib.Loaded = true
+hook.Run("gebLib.Loaded", gebLib)

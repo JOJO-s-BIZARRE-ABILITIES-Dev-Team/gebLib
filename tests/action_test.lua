@@ -110,7 +110,7 @@ local function testStartCallbackCanPause()
     action:Stop()
 end
 
-assert(loadfile("lua/includes/geblib_action.lua"))()
+assert(loadfile("lua/geblib/action.lua"))()
 testTimelineAndRepetition()
 testPauseAndResume()
 testInvalidEntityCleanup()

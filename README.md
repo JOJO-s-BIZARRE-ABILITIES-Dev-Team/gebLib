@@ -2,6 +2,38 @@
 
 gebLib is a small Garry's Mod Lua library for status effects, timed actions, animation events, cinematic cameras, and a few focused helpers.
 
+## Loading and dependencies
+
+gebLib uses `lua/autorun/000_geblib_v2.lua` so its shared bootstrap runs early in Garry's Mod's alphabetically sorted autorun phase. This is an early-loading measure, not an addon-level priority system.
+
+Code in `autorun/server`, `autorun/client`, the active gamemode, weapons, entities, and effects loads after the shared autorun phase and can use gebLib directly.
+
+Another shared autorun file should support either order:
+
+```lua
+local initialized = false
+local hookId = "MyAddon.GebLibReady"
+
+local function initialize(lib)
+    if initialized then return end
+
+    initialized = true
+    hook.Remove("gebLib.Loaded", hookId)
+
+    -- Safe to use lib here.
+end
+
+if gebLib and gebLib.Loaded then
+    initialize(gebLib)
+else
+    hook.Add("gebLib.Loaded", hookId, initialize)
+end
+```
+
+The bootstrap sets `gebLib.Loaded` only after every module has been included, then runs `gebLib.Loaded`. Readiness callbacks must not return a value because Garry's Mod stops dispatching a hook after a non-`nil` return.
+
+Workshop Required Items can advertise and install gebLib, but do not control Lua execution order.
+
 ## Status effects
 
 Register a definition once:
@@ -173,9 +205,10 @@ end)
 
 ## Validation
 
-Run the focused Status Effect tests from the addon root:
+Run the focused tests from the addon root:
 
 ```powershell
+lua tests/bootstrap_test.lua
 lua tests/status_effects_test.lua
 lua tests/action_test.lua
 ```
