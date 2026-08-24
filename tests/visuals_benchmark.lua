@@ -22,8 +22,19 @@ math.ease.InOutSine = math.ease.InOutSine or function(value)
 end
 
 NULL = {valid = false}
-vector_origin = {}
+local vectorMeta = {}
+vectorMeta.__index = vectorMeta
+function vectorMeta:Add(other)
+    self.x = self.x + other.x
+    self.y = self.y + other.y
+    self.z = self.z + other.z
+end
+function Vector(x, y, z) return setmetatable({x = x, y = y, z = z}, vectorMeta) end
+function VectorRand(minimum, maximum) return Vector(maximum, minimum, maximum) end
+vector_origin = Vector(0, 0, 0)
 angle_zero = {}
+color_white = {r = 255, g = 255, b = 255, a = 255}
+math.Rand = math.Rand or function(minimum, maximum) return (minimum + maximum) / 2 end
 
 timer = {}
 function timer.Remove(name) scheduledTimers[name] = nil end
@@ -35,6 +46,31 @@ hook = {}
 function hook.Add(eventName, hookName, callback) hooks[eventName] = callback end
 
 render = {SetBlend = function() end}
+
+local particleMethods = {}
+function particleMethods:SetDieTime() end
+function particleMethods:SetStartAlpha() end
+function particleMethods:SetEndAlpha() end
+function particleMethods:SetStartSize() end
+function particleMethods:SetEndSize() end
+function particleMethods:SetColor() end
+function particleMethods:SetVelocity() end
+function particleMethods:SetGravity() end
+function particleMethods:SetCollide() end
+function particleMethods:SetLighting() end
+function particleMethods:SetRoll() end
+function particleMethods:SetRollDelta() end
+function particleMethods:SetBounce() end
+local particleMeta = {__index = particleMethods}
+
+local function newParticle() return setmetatable({}, particleMeta) end
+
+function ParticleEmitter()
+    local emitter = {}
+    function emitter:Add() return newParticle() end
+    function emitter:Finish() end
+    return emitter
+end
 
 local function newEntity()
     nextEntityId = nextEntityId + 1
@@ -141,6 +177,16 @@ runDueTimers()
 if hooks.Think then hooks.Think() end
 local expireElapsed = os.clock() - expireStarted
 
+local burstElapsed
+local emitted = 0
+if gebLib.Visuals.CreateDebrisBurst then
+    local burstStarted = os.clock()
+    emitted = gebLib.Visuals.CreateDebrisBurst("effects/fleck", vector_origin, debrisCount, {
+        collide = false,
+    })
+    burstElapsed = os.clock() - burstStarted
+end
+
 print("gebLib debris local Lua benchmark")
 print(string.format("%d debris created in %.3f ms", debrisCount, createElapsed * 1000))
 print(string.format("%d idle frames in %.3f ms", frameCount, idleElapsed * 1000))
@@ -151,6 +197,9 @@ print(string.format(
 ))
 print(string.format("fade scheduling completed in %.3f ms", fadeElapsed * 1000))
 print(string.format("%d debris expired in %.3f ms", debrisCount, expireElapsed * 1000))
+if burstElapsed then
+    print(string.format("%d particle debris emitted in %.3f ms", emitted, burstElapsed * 1000))
+end
 print(string.format(
     "%d active before expiry, %d after, %d SetModelScale calls",
     activeBeforeExpiry,

@@ -292,6 +292,12 @@ camera:Play()
 player:gebLib_ChatAddText(Color(255, 200, 80), "Message")
 
 local debris = gebLib.Visuals.CreateDebris("models/props_junk/wood_crate001a.mdl", true, 5)
+local emitted = gebLib.Visuals.CreateDebrisBurst("effects/fleck_cement1", position, 1200, {
+    lifetime = 4,
+    size = 3,
+    speed = 350,
+    collide = false,
+})
 local decal = gebLib.Visuals.CreateDecal("decals/scorch1", position, angles, 32, 3)
 
 gebLib.Drawing.Circle(x, y, radius, color, progress)
@@ -304,6 +310,8 @@ local duration = gebLib.SoundDuration("sound/example.mp3")
 Debris is client-only and capped at 512 active entities by default. Creating another removes the debris that would expire next. Change `gebLib.Visuals.MaxDebris` before creating debris when a feature needs a different budget.
 
 `CreateDebris` uses one shared event scheduler instead of a per-frame scan. Full-opacity debris stays on the engine draw path, then enters Lua only for its final one-second fade. Render-only `ClientsideModel` debris grows through engine interpolation. Physical client props skip animated scaling to avoid client trace errors.
+
+Use `CreateDebrisBurst` for hundreds or thousands of cosmetic fragments. It creates one engine particle emitter instead of one entity per fragment and returns the number emitted. It accepts a material rather than a model. World collision is enabled by default; pass `collide = false` for the highest throughput. Optional settings are `lifetime`, `size`, `endSize`, `speed`, `spin`, `velocity`, `gravity`, `bounce`, `color`, `collide`, and `lighting`.
 
 ```lua
 print(gebLib.Visuals.GetDebrisCount())
@@ -363,4 +371,4 @@ All shipped Lua files use Lua 5.1-compatible syntax. They are checked with LuaJI
 
 Run the optional local CPU benchmark with `lua tests/net_benchmark.lua` or `luajit tests/net_benchmark.lua`. It compares schema sends against equivalent direct `net` calls in a Lua mock. It is useful for tracking wrapper overhead, but only an in-game benchmark can measure Source networking and real addon traffic.
 
-Run `lua tests/visuals_benchmark.lua` or `luajit tests/visuals_benchmark.lua` to measure debris creation, idle overhead, full-opacity Lua render callbacks, fade scheduling, and expiry. It does not measure engine rendering or physics cost.
+Run `lua tests/visuals_benchmark.lua` or `luajit tests/visuals_benchmark.lua` to measure model-debris creation, idle overhead, full-opacity Lua render callbacks, fade scheduling, expiry, and particle-burst setup. It does not measure engine rendering, particle simulation, or physics cost.

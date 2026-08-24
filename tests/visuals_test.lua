@@ -3,6 +3,7 @@ local nextEntityId = 0
 local failCreation = false
 local scheduledTimers = {}
 local blendCalls = {}
+local emitters = {}
 
 local function assertEqual(actual, expected, message)
     if actual ~= expected then
@@ -21,8 +22,21 @@ function IsValid(value) return type(value) == "table" and value.valid == true en
 function CurTime() return now end
 
 NULL = {valid = false}
-vector_origin = {}
+local vectorMeta = {}
+vectorMeta.__index = vectorMeta
+function vectorMeta:Add(other)
+    self.x = self.x + other.x
+    self.y = self.y + other.y
+    self.z = self.z + other.z
+end
+function Vector(x, y, z) return setmetatable({x = x, y = y, z = z}, vectorMeta) end
+function VectorRand(minimum, maximum)
+    return Vector(maximum, minimum, maximum)
+end
+vector_origin = Vector(0, 0, 0)
 angle_zero = {}
+color_white = {r = 255, g = 255, b = 255, a = 255}
+math.Rand = math.Rand or function(minimum, maximum) return (minimum + maximum) / 2 end
 
 timer = {}
 function timer.Remove(name) scheduledTimers[name] = nil end
@@ -32,6 +46,33 @@ end
 
 render = {}
 function render.SetBlend(blend) blendCalls[#blendCalls + 1] = blend end
+
+function ParticleEmitter(position)
+    local emitter = {position = position, particles = {}, finished = false}
+    emitters[#emitters + 1] = emitter
+
+    function emitter:Add(material, particlePosition)
+        local particle = {material = material, position = particlePosition}
+        self.particles[#self.particles + 1] = particle
+        function particle:SetDieTime(value) self.dieTime = value end
+        function particle:SetStartAlpha(value) self.startAlpha = value end
+        function particle:SetEndAlpha(value) self.endAlpha = value end
+        function particle:SetStartSize(value) self.startSize = value end
+        function particle:SetEndSize(value) self.endSize = value end
+        function particle:SetColor(r, g, b) self.color = {r = r, g = g, b = b} end
+        function particle:SetVelocity(value) self.velocity = value end
+        function particle:SetGravity(value) self.gravity = value end
+        function particle:SetCollide(value) self.collide = value end
+        function particle:SetLighting(value) self.lighting = value end
+        function particle:SetRoll(value) self.roll = value end
+        function particle:SetRollDelta(value) self.rollDelta = value end
+        function particle:SetBounce(value) self.bounce = value end
+        return particle
+    end
+
+    function emitter:Finish() self.finished = true end
+    return emitter
+end
 
 local function newEntity(clientProp)
     nextEntityId = nextEntityId + 1
@@ -78,6 +119,51 @@ dofile("lua/geblib/visuals.lua")
 
 local Visuals = gebLib.Visuals
 local timerName = "gebLib.Visuals.Debris"
+
+do
+    local position = Vector(1, 2, 3)
+    local gravity = Vector(0, 0, -300)
+    local emitted = Visuals.CreateDebrisBurst("effects/fleck", position, 1000, {
+        lifetime = 4,
+        size = 3,
+        endSize = 1,
+        speed = 10,
+        spin = 90,
+        velocity = Vector(1, 2, 3),
+        gravity = gravity,
+        collide = false,
+        lighting = true,
+        color = {r = 10, g = 20, b = 30, a = 200},
+    })
+
+    local emitter = emitters[#emitters]
+    local particle = emitter.particles[1]
+    assertEqual(emitted, 1000, "particle debris count")
+    assertEqual(#emitter.particles, 1000, "particle allocation count")
+    assertEqual(emitter.finished, true, "particle emitter should finish")
+    assertEqual(Visuals.GetDebrisCount(), 0, "particle debris should not create entities")
+    assertEqual(particle.material, "effects/fleck", "particle material")
+    assertEqual(particle.dieTime, 4, "particle lifetime")
+    assertEqual(particle.startAlpha, 200, "particle alpha")
+    assertEqual(particle.endAlpha, 0, "particle fade")
+    assertEqual(particle.startSize, 3, "particle size")
+    assertEqual(particle.endSize, 1, "particle end size")
+    assertEqual(particle.velocity.x, 11, "particle velocity x")
+    assertEqual(particle.velocity.y, -8, "particle velocity y")
+    assertEqual(particle.velocity.z, 13, "particle velocity z")
+    assertEqual(particle.gravity, gravity, "particle gravity")
+    assertEqual(particle.collide, false, "particle collision")
+    assertEqual(particle.lighting, true, "particle lighting")
+    assertEqual(particle.bounce, nil, "non-colliding particles should skip bounce")
+
+    assertEqual(Visuals.CreateDebrisBurst("effects/fleck", position, 1), 1, "default particle burst")
+    local defaultParticle = emitters[#emitters].particles[1]
+    assertEqual(defaultParticle.collide, true, "particle collision default")
+    assertNear(defaultParticle.bounce, 0.35, 0.0001, "particle bounce default")
+    assertEqual(defaultParticle.lighting, false, "particle lighting default")
+    assertEqual(Visuals.CreateDebrisBurst("", position, 1000), 0, "empty particle material")
+    assertEqual(Visuals.CreateDebrisBurst("effects/fleck", position, 0), 0, "empty particle burst")
+end
 
 do
     local debris = Visuals.CreateDebris("model", false, 5)
