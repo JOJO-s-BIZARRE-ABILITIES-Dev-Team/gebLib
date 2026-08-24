@@ -6,6 +6,8 @@ gebLib is a small Garry's Mod Lua library for status effects, timed actions, ani
 
 gebLib uses `lua/autorun/000_geblib_v2.lua` so its shared bootstrap runs early in Garry's Mod's alphabetically sorted autorun phase. This is an early-loading measure, not an addon-level priority system.
 
+Actions, Animations, Cinematic Cameras, and Debris Waves share one internal frame dispatcher. Each still owns its lifecycle and cleanup rules independently.
+
 Code in `autorun/server`, `autorun/client`, the active gamemode, weapons, entities, and effects loads after the shared autorun phase and can use gebLib directly.
 
 Another shared autorun file should support either order:
@@ -147,6 +149,8 @@ The server records packet and record rates, encoded bits, recipient fan-out, rep
 
 Profiler advice is based on observed traffic, not a proof of the domain limits. Confirm rare and future values before changing a released schema. Profiling is disabled by default, does not replace the global `net` functions, and never modifies a schema automatically.
 
+Network Codecs and compiled Network Message schemas are owned and immutable after definition. Changing the caller's schema table later cannot change the wire contract.
+
 ### In-game network self-test
 
 Enable development mode before entering a single-player or listen-server game:
@@ -212,6 +216,8 @@ Definitions support four optional callbacks:
 
 `onRemove` receives a short reason such as `expired`, `death`, `replaced`, `cleared`, or `entity removed`.
 
+Registration copies and owns the Status Effect Definition. `gebLib_GetStatusEffects()` returns a snapshot of the entity's effect map; the Applied Status Effect values remain mutable so callbacks can keep intentional state such as stack counts.
+
 Status effects are not automatically networked. Apply gameplay effects on the server. Send only the state a client UI actually needs.
 
 ## Timed actions
@@ -230,7 +236,9 @@ end)
 action:Start()
 ```
 
-An Action owns its Think hook and removes itself when it finishes. It also supports repetition, delayed starts, pause, resume, and time scaling.
+An Action owns its lifecycle and removes itself when it finishes. It also supports repetition, delayed starts, pause, resume, and time scaling.
+
+Internally, Actions use the shared frame dispatcher rather than installing one hook per instance. An unhandled callback error removes the Action and runs its cleanup once.
 
 The complete lifecycle is `Start`, `Pause`, `Resume`, and `Stop`. Use `SetInit` and `SetEnd` for timeline events at zero and at the configured duration, `OnStart` for the initial start, and `OnRemove` for final cleanup.
 
@@ -337,7 +345,9 @@ Use `CreateDebrisBurst` for hundreds or thousands of cosmetic fragments. It crea
 
 `CreateWaterDebris` layers dense spray, droplets, low mist, `watersplash`, `gunshotsplash`, and surface-bound `waterripple` effects. `particleCount` or `count` controls the particle budget. Optional settings include `direction`, `velocity`, `speed`, `spread`, `scale`, `radius`, `splashCount`, `rippleCount`, `color`, `mistColor`, and material overrides for each layer. Set `particles`, `effects`, `mist`, `gunshotSplashes`, or `ripples` to `false` to disable that layer.
 
-`CreateDebrisWave` emits ordered surface-aware debris from one shared `Think` scheduler. It does not create timers or per-step closures. Configure `origin`, `direction`, `spreadAxis`, `count`, `delay`, `interval`, `maxStepsPerFrame`, `distanceStep`, `spread`, `integerSpread`, `lifetime`, `preserveCount`, `surface`, `material`, `materialType`, and `modelPath`. Set `floor` to a table to trace beneath each step, anchor debris to the hit position, and sample that floor's material and model family. Floor traces include water by default, and water hits emit splash layers instead of models. Use the nested `water` table to tune the per-step water strength and the same settings accepted by `CreateWaterDebris`, or set `water = false` to disable water effects. Set `floor.water = false` to exclude water from the trace mask. Steps without a valid supporting surface are skipped. Displacements without a usable texture name use the sampled surface color as an entity tint; set `colorFallback = false` to disable that fallback. Other floor options are `startHeight`, `depth`, `offset`, `minNormalZ`, `mask`, `filter`, `collisionGroup`, `ignoreWorld`, `rejectSky`, and `rejectNoDraw`. The nested `prop` and `model` tables configure offsets, scale ranges, angles, physics velocity, jitter, collision, and setup callbacks. Step-indexed `events` still run for skipped steps. The `onStart`, `onStep`, `onComplete`, and `onCancel` callbacks provide lifecycle control; `onStep` receives a nil position when the floor trace rejects a step. The returned Debris Wave supports `Pause`, `Resume`, `Cancel`, `IsActive`, `GetProgress`, `GetSpawnedCount`, and `GetSkippedCount`.
+`CreateDebrisWave` emits ordered surface-aware debris through the shared frame dispatcher. It does not create timers or per-step closures. Configure `origin`, `direction`, `spreadAxis`, `count`, `delay`, `interval`, `maxStepsPerFrame`, `distanceStep`, `spread`, `integerSpread`, `lifetime`, `preserveCount`, `surface`, `material`, `materialType`, and `modelPath`. Set `floor` to a table to trace beneath each step, anchor debris to the hit position, and sample that floor's material and model family. Floor traces include water by default, and water hits emit splash layers instead of models. Use the nested `water` table to tune the per-step water strength and the same settings accepted by `CreateWaterDebris`, or set `water = false` to disable water effects. Set `floor.water = false` to exclude water from the trace mask. Steps without a valid supporting surface are skipped. Displacements without a usable texture name use the sampled surface color as an entity tint; set `colorFallback = false` to disable that fallback. Other floor options are `startHeight`, `depth`, `offset`, `minNormalZ`, `mask`, `filter`, `collisionGroup`, `ignoreWorld`, `rejectSky`, and `rejectNoDraw`. The nested `prop` and `model` tables configure offsets, scale ranges, angles, physics velocity, jitter, collision, and setup callbacks. Step-indexed `events` still run for skipped steps. The `onStart`, `onStep`, `onComplete`, and `onCancel` callbacks provide lifecycle control; `onStep` receives a nil position when the floor trace rejects a step. The returned Debris Wave supports `Pause`, `Resume`, `Cancel`, `IsActive`, `GetProgress`, `GetSpawnedCount`, and `GetSkippedCount`.
+
+Visual settings are copied and normalized when creation begins. Mutating the original nested Debris Wave settings later does not change an active wave. A callback error cancels the wave and runs its cancellation cleanup once.
 
 ```lua
 print(gebLib.Visuals.GetDebrisCount())
@@ -396,6 +406,13 @@ end)
 - Generic entity-field networking was replaced by typed `gebLib.Net` messages. Power Level, global entity/player caches, global blacklists, unfinished Derma controls, and unrelated utility helpers were removed.
 - Debris and decals moved to `gebLib.Visuals`.
 - Drawing helpers moved to `gebLib.Drawing`.
+
+## Behavioral hardening in 2.1
+
+- Lifecycle modules use one mutation-safe frame dispatcher and contain callback failures with domain-specific cleanup.
+- Network Codecs, compiled schemas, and Status Effect Definitions are owned after registration.
+- Status-effect map inspection returns a snapshot instead of exposing internal storage.
+- Transient Visual lifetime, surface sampling, settings, Debris Wave execution, profiling, and decals use private implementations behind `gebLib.Visuals`.
 
 ## Validation
 

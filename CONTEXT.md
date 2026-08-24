@@ -25,6 +25,12 @@ A client-only debris model or decal with a finite lifetime.
 **Debris Wave**:
 A controllable Transient Visual that emits ordered debris steps over time from one shared frame scheduler.
 
+**Frame Dispatcher**:
+The internal mutation-safe frame loop shared by independently owned Actions, Animations, Cinematic Cameras, and Debris Waves.
+
+**Transient Visual Plan**:
+An owned, normalized set of settings prepared once before a Transient Visual is emitted.
+
 **Network Message**:
 A named, directional packet with one shared ordered schema and one receiving callback.
 
@@ -44,6 +50,8 @@ Opt-in observations about packet and record size, frequency, recipients, repeate
 - An **Action**, **Animation**, and **Cinematic Camera** each own their lifecycle independently.
 - A **Transient Visual** exists only on the client that creates it.
 - A **Debris Wave** owns its emission progress and may be paused, resumed, or cancelled independently.
+- The **Frame Dispatcher** advances lifecycles without owning their domain rules.
+- A **Debris Wave** executes one **Transient Visual Plan** that cannot be changed through its caller's settings table.
 - A **Network Message** is either server-to-client or client-to-server.
 - A **Network Message** owns an ordered list of **Network Codecs**.
 - A **Network Batch** belongs to one batch-enabled Network Message and preserves record order.

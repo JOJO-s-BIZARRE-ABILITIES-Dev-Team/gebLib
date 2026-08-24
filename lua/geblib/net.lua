@@ -1,6 +1,12 @@
 local Net = gebLib.Net or {}
 gebLib.Net = Net
 
+local Runtime = gebLib._Runtime
+if not Runtime then
+    local runtimeLoader = include or function(path) return assert(loadfile("lua/" .. path))() end
+    Runtime = runtimeLoader("geblib/runtime.lua")
+end
+
 local unpackValues = unpack or table.unpack
 local MAX_PAYLOAD_BITS = 60 * 1024 * 8
 local MESSAGE_NAME_PATTERN = "^[a-z0-9][a-z0-9%._]*$"
@@ -9,6 +15,7 @@ local TO_SERVER = "server"
 
 local Message = {}
 Message.__index = Message
+local codecDefinitions = setmetatable({}, {__mode = "k"})
 
 Net._Messages = Net._Messages or {}
 Net._Profile = Net._Profile or {messages = {}}
@@ -69,19 +76,23 @@ end
 
 local function makeCodec(definition)
     definition._gebLibNetCodec = true
-    return setmetatable({}, {
+    local codec = setmetatable({}, {
         __index = definition,
         __newindex = function()
             fail("Network Codecs are immutable after creation", 3)
         end,
         __metatable = false,
     })
+    codecDefinitions[codec] = definition
+    return codec
 end
 
 local function assertCodec(codec, context)
-    if not isTable(codec) or codec._gebLibNetCodec ~= true then
+    local definition = isTable(codec) and codecDefinitions[codec] or nil
+    if not definition then
         fail((context or "value") .. " must be a gebLib.Net codec", 2)
     end
+    return definition
 end
 
 local function simpleCodec(kind, signature, bits, accepts, writer, reader, minimumBits)
@@ -511,11 +522,11 @@ local function compileSchema(name, schema)
     local fixedSize = true
 
     for index = 1, length do
-        local codec = schema[index]
-        assertCodec(codec, "schema field #" .. index)
+        local publicCodec = schema[index]
+        local codec = assertCodec(publicCodec, "schema field #" .. index)
         local label = name .. " field #" .. index
         signatures[index] = codec.Signature
-        ownedSchema[index] = codec
+        ownedSchema[index] = publicCodec
         fields[index] = {
             codec = codec,
             label = label,
@@ -961,9 +972,22 @@ local function receiveMessage(message, length, sender)
     for index = 1, #records do
         local values = records[index]
         if message.Direction == TO_SERVER then
-            message.Handler(sender, unpackValues(values, 1, values.n))
+            Runtime.Invoke(
+                message,
+                "Network Message " .. message.Name .. " receiver",
+                message.Handler,
+                nil,
+                sender,
+                unpackValues(values, 1, values.n)
+            )
         else
-            message.Handler(unpackValues(values, 1, values.n))
+            Runtime.Invoke(
+                message,
+                "Network Message " .. message.Name .. " receiver",
+                message.Handler,
+                nil,
+                unpackValues(values, 1, values.n)
+            )
         end
     end
 end
