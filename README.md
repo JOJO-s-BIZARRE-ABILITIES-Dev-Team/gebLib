@@ -1,12 +1,12 @@
-# gebLib 2
+# gebLib 3
 
-gebLib is a small Garry's Mod Lua library for status effects, timed actions, animation events, cinematic cameras, and a few focused helpers.
+gebLib is a small Garry's Mod Lua library for status effects, scheduled gameplay work, player animation layers, cinematic cameras, and a few focused helpers.
 
 ## Loading and dependencies
 
-gebLib uses `lua/autorun/000_geblib_v2.lua` so its shared bootstrap runs early in Garry's Mod's alphabetically sorted autorun phase. This is an early-loading measure, not an addon-level priority system.
+The stable bootstrap filename remains `lua/autorun/000_geblib_v2.lua` for upgrade compatibility. Its numeric prefix makes the shared bootstrap run early in Garry's Mod's alphabetically sorted autorun phase; this is not an addon-level priority system.
 
-Actions, Animations, Cinematic Cameras, and Debris Waves share one internal frame dispatcher. Each still owns its lifecycle and cleanup rules independently.
+Scheduled Actions, Cinematic Cameras, and Debris Waves share one internal frame dispatcher. Each still owns its lifecycle and cleanup rules independently.
 
 Code in `autorun/server`, `autorun/client`, the active gamemode, weapons, entities, and effects loads after the shared autorun phase and can use gebLib directly.
 
@@ -220,43 +220,21 @@ Registration copies and owns the Status Effect Definition. `gebLib_GetStatusEffe
 
 Status effects are not automatically networked. Apply gameplay effects on the server. Send only the state a client UI actually needs.
 
-## Timed actions
+## Scheduled actions
 
 ```lua
-local action = gebLib.Action.New(player, 2)
-
-action:AddEvent("damage", 0.5, function(current)
-    current.Entity:TakeDamage(20)
+local action = gebLib.ScheduledAction.After(player, 0.5, function()
+    if IsValid(player) then player:TakeDamage(20) end
 end)
 
-action:SetEnd(function(current)
-    print("finished", current:GetIndex())
-end)
-
-action:Start()
+action:SetTimeScale(2) -- Completes twice as quickly.
 ```
 
-An Action owns its lifecycle and removes itself when it finishes. It also supports repetition, delayed starts, pause, resume, and time scaling.
+A Scheduled Action runs one callback after its delay. Its entity owner must remain valid, otherwise the action cancels without running the callback.
 
-Internally, Actions use the shared frame dispatcher rather than installing one hook per instance. An unhandled callback error removes the Action and runs its cleanup once.
+`Cancel`, `Pause`, and `Resume` return whether they changed the action. `SetTimeScale` changes how quickly the remaining delay advances, and `IsPending` includes paused actions. Completed and cancelled actions cannot be restarted.
 
-The complete lifecycle is `Start`, `Pause`, `Resume`, and `Stop`. Use `SetInit` and `SetEnd` for timeline events at zero and at the configured duration, `OnStart` for the initial start, and `OnRemove` for final cleanup.
-
-## Entity animations
-
-```lua
-local animation = gebLib.Animation.New(entity, "attack")
-
-animation:AddEvent("hit", 12, function(current)
-    print("hit frame", current:GetFrame())
-end)
-
-animation:SetEnd(function()
-    print("animation finished")
-end)
-
-animation:Play()
-```
+Internally, Scheduled Actions use the shared frame dispatcher rather than installing one hook per action. Callback failures are reported and contained after the action has completed.
 
 ## Player animation layers
 
@@ -406,6 +384,12 @@ end)
 - Generic entity-field networking was replaced by typed `gebLib.Net` messages. Power Level, global entity/player caches, global blacklists, unfinished Derma controls, and unrelated utility helpers were removed.
 - Debris and decals moved to `gebLib.Visuals`.
 - Drawing helpers moved to `gebLib.Drawing`.
+
+## Breaking changes from v2
+
+- The broad `gebLib.Action` event timeline was replaced by `gebLib.ScheduledAction.After(owner, delay, callback)`.
+- The unused standalone `gebLib.Animation` sequence controller was removed. Use player animation layers for networked player gestures or Garry's Mod sequence functions for entity-specific control.
+- Scheduled Action handles use `Cancel` instead of `Stop` or `Remove`. They retain pause, resume, time scaling, and entity-owner cancellation.
 
 ## Behavioral hardening in 2.1
 

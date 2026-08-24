@@ -5,14 +5,9 @@ local world = {valid = true}
 gebLib = {}
 
 function isnumber(value) return type(value) == "number" end
-function isstring(value) return type(value) == "string" end
 function isfunction(value) return type(value) == "function" end
 function IsValid(value) return type(value) == "table" and value.valid == true end
 function CurTime() return now end
-
-game = {
-    GetWorld = function() return world end,
-}
 
 hook = {}
 
@@ -40,80 +35,78 @@ local function assertEqual(actual, expected, message)
     end
 end
 
-local function testTimelineAndRepetition()
-    local events = {start = 0, middle = 0, finish = 0, remove = 0}
-    local action = gebLib.Action.New(world, 2)
+assert(loadfile("lua/geblib/scheduled_action.lua"))()
 
-    action:OnStart(function() events.start = events.start + 1 end)
-    action:AddEvent("middle", 0.5, function() events.middle = events.middle + 1 end)
-    action:SetEnd(function() events.finish = events.finish + 1 end)
-    action:OnRemove(function() events.remove = events.remove + 1 end)
+do
+    local calls = 0
+    local action = gebLib.ScheduledAction.After(world, 2, function(current)
+        calls = calls + 1
+        assertEqual(current:IsPending(), false, "callback should observe a completed action")
+    end)
 
-    assertEqual(action:Start(1, 1), true, "action should start")
-    tick(0.5)
-    assertEqual(events.middle, 0, "delay should postpone events")
-    tick(1.5)
-    assertEqual(events.middle, 1, "event should run in the first cycle")
-    tick(3)
-    assertEqual(events.finish, 1, "end event should run in the first cycle")
-    tick(3.5)
-    assertEqual(events.middle, 2, "event should reload for the repeated cycle")
-    tick(5)
-
-    assertEqual(events.start, 1, "start callback should run once")
-    assertEqual(events.finish, 2, "end event should run once per cycle")
-    assertEqual(events.remove, 1, "remove callback should run once")
-    assertEqual(action.Removed, true, "completed action should remove itself")
-end
-
-local function testPauseAndResume()
-    local eventCount = 0
-    local action = gebLib.Action.New(2)
-    action:AddEvent("event", 1, function() eventCount = eventCount + 1 end)
-
-    now = 0
-    action:Start()
-    tick(0.5)
-    assertEqual(action:Pause(), true, "playing action should pause")
+    assertEqual(next(action), nil, "scheduled action handle should not expose lifecycle state")
+    tick(1.99)
+    assertEqual(calls, 0, "scheduled callback should wait for its delay")
+    assertEqual(action:IsPending(), true, "action should remain pending before its delay")
+    tick(2)
+    assertEqual(calls, 1, "scheduled callback should run once")
     tick(10)
-    assertEqual(eventCount, 0, "paused time should not advance the action")
-    assertEqual(action:Resume(), true, "paused action should resume")
-    tick(10.4)
-    assertEqual(eventCount, 0, "resume should retain elapsed action time")
-    tick(10.5)
-    assertEqual(eventCount, 1, "event should run after the remaining delay")
-    action:Stop()
+    assertEqual(calls, 1, "completed callback must not repeat")
+    assertEqual(action:IsPending(), false, "completed action should not remain pending")
 end
 
-local function testInvalidEntityCleanup()
-    local entity = {valid = true}
-    local action = gebLib.Action.New(entity, 10)
-    action:Start()
-    entity.valid = false
-    tick(1)
-    assertEqual(action.Removed, true, "invalid owner should remove its action")
-end
-
-local function testStartCallbackCanPause()
-    local eventCount = 0
-    local action = gebLib.Action.New(world, 1)
-    action:AddEvent("event", 0.5, function() eventCount = eventCount + 1 end)
-    action:OnStart(function(current) current:Pause() end)
-
+do
     now = 0
-    assertEqual(action:Start(), true, "start callback should be able to pause")
-    tick(5)
-    assertEqual(eventCount, 0, "start-paused action should not advance")
-    action:Resume()
-    tick(5.5)
-    assertEqual(eventCount, 1, "start-paused action should resume normally")
-    action:Stop()
+    local calls = 0
+    local action = gebLib.ScheduledAction.After(world, 2, function() calls = calls + 1 end)
+
+    tick(0.5)
+    assertEqual(action:Pause(), true, "pending action should pause")
+    tick(10)
+    assertEqual(calls, 0, "paused action should not advance")
+    assertEqual(action:Resume(), true, "paused action should resume")
+    tick(11.49)
+    assertEqual(calls, 0, "resumed action should retain elapsed time")
+    tick(11.5)
+    assertEqual(calls, 1, "resumed action should run after the remaining delay")
 end
 
-assert(loadfile("lua/geblib/action.lua"))()
-testTimelineAndRepetition()
-testPauseAndResume()
-testInvalidEntityCleanup()
-testStartCallbackCanPause()
+do
+    now = 0
+    local calls = 0
+    local action = gebLib.ScheduledAction.After(world, 4, function() calls = calls + 1 end)
 
-print("actions: ok")
+    tick(1)
+    assertEqual(action:SetTimeScale(2), true, "pending action should accept a time scale")
+    tick(2.49)
+    assertEqual(calls, 0, "time scale should preserve work accrued at the old rate")
+    tick(2.5)
+    assertEqual(calls, 1, "time scale should accelerate the remaining delay")
+end
+
+do
+    now = 0
+    local owner = {valid = true}
+    local calls = 0
+    local action = gebLib.ScheduledAction.After(owner, 10, function() calls = calls + 1 end)
+
+    assertEqual(action:Pause(), true, "pending action should pause before owner cleanup")
+    owner.valid = false
+    tick(1)
+    assertEqual(calls, 0, "invalid owner should not receive its callback")
+    assertEqual(action:IsPending(), false, "invalid owner should cancel its action")
+    assertEqual(action:Cancel(), false, "cancel should be idempotent")
+end
+
+do
+    now = 0
+    local calls = 0
+    local action = gebLib.ScheduledAction.After(world, 1, function() calls = calls + 1 end)
+
+    assertEqual(action:Cancel(), true, "pending action should cancel")
+    tick(2)
+    assertEqual(calls, 0, "cancelled action should not run")
+    assertEqual(action:IsPending(), false, "cancelled action should not remain pending")
+end
+
+print("scheduled actions: ok")
