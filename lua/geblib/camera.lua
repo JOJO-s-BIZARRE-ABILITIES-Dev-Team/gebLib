@@ -4,6 +4,12 @@ gebLib.Camera.__index = gebLib.Camera
 local Camera = gebLib.Camera
 gebLib._NextCameraId = gebLib._NextCameraId or 0
 
+local Runtime = gebLib._Runtime
+if not Runtime then
+	local loader = include or function(path) return assert(loadfile("lua/" .. path))() end
+	Runtime = loader("geblib/runtime.lua")
+end
+
 --------------------
 --Contributors: T0M
 --------------------
@@ -12,6 +18,71 @@ gebLib._NextCameraId = gebLib._NextCameraId or 0
 local function RenderOverride(self)
 	self:DrawModel()
 	self:FrameAdvance()
+end
+
+local function failCamera(camera)
+	camera:Stop()
+end
+
+local function updateCameraFrame(camera)
+	camera.CurFrame = (SysTime() - camera.Start) * camera.FPS
+end
+
+local function maintainCameraPresentation(camera)
+	if SERVER or not camera.UseDefaultHooks then return end
+
+	local owner = camera.Player
+	if IsValid(camera.Copy) then
+		if camera.OriginalNoDraw == nil then camera.OriginalNoDraw = owner:GetNoDraw() end
+		owner:SetNoDraw(true)
+	end
+	if camera.OldAng then owner:SetEyeAngles(camera.OldAng) end
+	if camera.OldPos then owner:SetPos(camera.OldPos) end
+end
+
+local function runCameraEvents(camera, ply, pos, angles, fov, view)
+	for index = 1, #camera.EventOrder do
+		local frame = camera.EventOrder[index]
+		local data = camera.Events[frame]
+		if not data.Ended and camera.CurFrame >= frame and camera.CurFrame <= data.EndFrame then
+			local ok, origin, viewAngles, viewFov = camera:RunCallback(data.Function, ply, pos, angles, fov)
+			if not ok or not camera.Playing then return false end
+			if view then
+				if origin then view.origin = origin end
+				if viewAngles then view.angles = viewAngles end
+				if viewFov then view.fov = viewFov end
+			end
+		elseif not data.Ended and camera.CurFrame >= data.EndFrame then
+			data.Ended = true
+		end
+	end
+
+	return true
+end
+
+local function stepCamera(camera)
+	if not camera.Playing then return false end
+	if not camera:IsValid() then
+		camera:Stop()
+		return false
+	end
+
+	updateCameraFrame(camera)
+	maintainCameraPresentation(camera)
+
+	if CLIENT and not camera.Simulated then return true end
+	if not camera:RunThink() or not camera.Playing then return false end
+
+	if CLIENT and not runCameraEvents(camera, camera.Player, vector_origin, angle_zero, 70) then
+		return false
+	end
+
+	if camera.CurFrame >= camera.MaxFrames then
+		camera:Stop()
+		return false
+	end
+
+	return true
 end
 
 --Constructor
@@ -40,6 +111,7 @@ function Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHooks)
     self.FPS = fps --Recommended is 60
     self.MaxFrames = maxFrames
     self.Events = {}
+    self.EventOrder = {}
     self.FrameChecks = {}
 
     self.Playing = false
@@ -67,6 +139,15 @@ function Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHooks)
 end
 
 --General Functions
+function Camera:RunCallback(callback, ...)
+	return Runtime.Invoke(self, "Cinematic Camera " .. tostring(self), callback, failCamera, ...)
+end
+
+function Camera:RunThink()
+	if not self.ThinkFunc or not self.Playing then return true end
+	return self:RunCallback(self.ThinkFunc, self)
+end
+
 function Camera:Play(simulate)
     if self.Playing or not self:IsValid() then return false end
 
@@ -102,50 +183,23 @@ function Camera:Play(simulate)
 
 	self:AddDefaultHooks()
 
-	if SERVER then
-		hook.Add("Think", self.ThinkName, function()
-			if not self:IsValid() then self:Stop() return end
+	Runtime.Register(self, "Cinematic Camera " .. tostring(self), stepCamera, failCamera, failCamera)
 
-			self.CurFrame = (SysTime() - self.Start) * self.FPS
-
-			if self.ThinkFunc and self.Playing then
-                self.ThinkFunc(self)
-            end
-
-			if self.CurFrame >= self.MaxFrames then
-                self:Stop()
-            end
-		end)
-
-		return true
-	end
-    
-    if not simulate then
+    if CLIENT and not simulate then
         hook.Add("CalcView", self.ThinkName, function(ply, pos, angles, fov)
-            if not IsValid(self.Player) then self:Stop() return end
-            
-            self.CurFrame = (SysTime() - self.Start) * self.FPS
+            if not self.Playing or not self:IsValid() then self:Stop() return end
+
+            updateCameraFrame(self)
             local view = {
                 origin = pos,
                 angles = angles,
                 fov = fov,
                 drawviewer = true
             }
-            if self.ThinkFunc and self.Playing then
-                self.ThinkFunc(self)
-            end
-            
-            for frame, data in pairs(self.Events) do
-                if not data.Ended and data.Function and self.CurFrame >= frame and self.CurFrame <= data.EndFrame then
-                    local origin, viewAngles = data.Function(ply, pos, angles, fov)
-                    if origin then view.origin = origin end
-                    if viewAngles then view.angles = viewAngles end
-                    if not self.Playing then return view end
-                elseif not data.Ended and data.Function and self.CurFrame >= frame and self.CurFrame >= data.EndFrame then
-                    data.Ended = true
-                end
-            end
-            
+
+            if not self:RunThink() or not self.Playing then return view end
+            if not runCameraEvents(self, ply, pos, angles, fov, view) then return view end
+
             if self.CurFrame >= self.MaxFrames then
                 self:Stop()
             end
@@ -153,33 +207,6 @@ function Camera:Play(simulate)
             self.LastPos = view.origin
             self.LastAng = view.angles
             return view
-        end)
-    else --For other players, simulate the camera behaviour, so everything is properly synced
-        hook.Add("Think", self.ThinkName, function()
-            if not IsValid(self.Player) then self:Stop() return end
-
-            self.CurFrame = (SysTime() - self.Start) * self.FPS
-            local ply = self.Player
-            local pos = vector_origin
-            local angles = angle_zero
-            local fov = 70
-
-            if self.ThinkFunc and self.Playing then
-                self.ThinkFunc(self)
-            end
-    
-            for frame, data in pairs(self.Events) do
-                if not data.Ended and data.Function and self.CurFrame >= frame and self.CurFrame <= data.EndFrame then
-                    data.Function(ply, pos, angles, fov)
-                    if not self.Playing then return end
-                elseif not data.Ended and data.Function and self.CurFrame >= frame and self.CurFrame >= data.EndFrame then
-                    data.Ended = true
-                end
-            end
-            
-            if self.CurFrame >= self.MaxFrames then
-                self:Stop()
-            end
         end)
     end
 
@@ -190,6 +217,7 @@ function Camera:Stop()
     if not self.Playing then return false end
 
 	self.Playing = false
+	Runtime.Unregister(self)
 	self:RemoveDefaultHooks()
 
 	if CLIENT and IsValid(self.Player) and self.OriginalNoDraw ~= nil then
@@ -199,9 +227,10 @@ function Camera:Stop()
 	if CLIENT and IsValid(self.Copy) then
 		self.Copy:Remove()
 	end
+	self.Copy = NULL
 
 	if self.EndFunc then
-		self.EndFunc(self)
+		Runtime.Invoke(self, "Cinematic Camera " .. tostring(self) .. " end callback", self.EndFunc, nil, self)
 	end
 
 	return true
@@ -246,7 +275,9 @@ function Camera:AddEvent(initFrame, endFrame, func)
 		error("camera event callback must be a function", 2)
 	end
 
+	if not self.Events[initFrame] then self.EventOrder[#self.EventOrder + 1] = initFrame end
     self.Events[initFrame] = {Function = func, Ended = false, EndFrame = endFrame, Start = 0}
+	table.sort(self.EventOrder)
 end
 
 function Camera:AddFakePlayerCopy()
@@ -305,31 +336,14 @@ function Camera:AddDefaultHooks()
 		end)
 	end
 
-	hook.Add("Think", self.HookName .. "_DefaultThink", function()
-		local owner = self.Player
-
-		if not self:IsValid() then self:Stop() return end
-
-		if IsValid(self.Copy) then
-			if self.OriginalNoDraw == nil then
-				self.OriginalNoDraw = owner:GetNoDraw()
-			end
-
-			owner:SetNoDraw(true)
-		end
-		if self.OldAng then owner:SetEyeAngles(self.OldAng) end
-		if self.OldPos then owner:SetPos(self.OldPos) end
-	end)
 end
 
 function Camera:RemoveDefaultHooks()
 	hook.Remove("DrawOverlay", self.HookName .. "_BlackBars")
 	hook.Remove("HUDShouldDraw", self.HookName .. "_NoHud")
-	hook.Remove("Think", self.HookName .. "_DefaultThink")
 
 	if self.ThinkName then
 		hook.Remove("CalcView", self.ThinkName)
-		hook.Remove("Think", self.ThinkName)
 	end
 end
 

@@ -303,6 +303,21 @@ local impactDebris = gebLib.Visuals.CreateImpactDebris(trace.HitPos, trace.HitNo
     count = 1200,
     direction = shotDirection,
 })
+local waterDebris = gebLib.Visuals.CreateWaterDebris(trace.HitPos, trace.HitNormal, 250, {
+    particleCount = 400,
+    direction = shotDirection + vector_up,
+})
+local wave = gebLib.Visuals.CreateDebrisWave({
+    origin = trace.HitPos,
+    direction = shotDirection,
+    count = 200,
+    interval = 0.01,
+    distanceStep = 35,
+    spread = 200,
+    floor = {startHeight = 64, depth = 256, filter = owner},
+    prop = {scaleMin = 1.5, scaleMax = 2.5, velocity = vector_up * 700},
+    model = {offset = vector_up * 8, scaleMin = 3, scaleMax = 5},
+})
 local decal = gebLib.Visuals.CreateDecal("decals/scorch1", position, angles, 32, 3)
 
 gebLib.Drawing.Circle(x, y, radius, color, progress)
@@ -318,7 +333,11 @@ Debris is client-only and capped at 512 active entities by default. Creating ano
 
 Use `CreateDebrisBurst` for hundreds or thousands of cosmetic fragments. It creates one engine particle emitter instead of one entity per fragment and returns the number emitted. It accepts a material rather than a model. World collision is enabled by default; pass `collide = false` for the highest throughput. Optional settings are `lifetime`, `size`, `endSize`, `speed`, `spin`, `velocity`, `direction`, `spread`, `gravity`, `bounce`, `color`, `collide`, and `lighting`.
 
-`CreateImpactDebris` creates a complete surface-aware impact. By default it keeps geometry bounded to 16 static low-poly chunks and 12 physical chunks, then renders the remaining count as cheap non-colliding particles. Pass `modelCount`, `propCount`, and `particleCount` when an effect needs an exact visual composition. `preserveCount = true` lets that effect exceed the shared entity budget. Surface materials are sampled once and cached, so models use the engine draw path without per-frame material overrides. Other options include `material`, `direction`, `craters`, `props`, `particles`, `smoke`, `smokeCount`, `surface`, `modelScale`, `lifetime`, `propLifetime`, and `shadows`.
+`CreateImpactDebris` creates a complete surface-aware impact. By default it keeps geometry bounded to 16 static low-poly chunks and 12 physical chunks, then renders the remaining count as cheap non-colliding particles. `MAT_SLOSH`, or a point touching water when `material` is omitted, automatically uses water debris instead of rocks and smoke. Pass `modelCount`, `propCount`, and `particleCount` when an effect needs an exact visual composition. `preserveCount = true` lets that effect exceed the shared entity budget. Surface materials are sampled once and cached, so models use the engine draw path without per-frame material overrides. Other options include `material`, `direction`, `craters`, `props`, `particles`, `smoke`, `smokeCount`, `surface`, `modelScale`, `lifetime`, `propLifetime`, and `shadows`.
+
+`CreateWaterDebris` layers dense spray, droplets, low mist, `watersplash`, `gunshotsplash`, and surface-bound `waterripple` effects. `particleCount` or `count` controls the particle budget. Optional settings include `direction`, `velocity`, `speed`, `spread`, `scale`, `radius`, `splashCount`, `rippleCount`, `color`, `mistColor`, and material overrides for each layer. Set `particles`, `effects`, `mist`, `gunshotSplashes`, or `ripples` to `false` to disable that layer.
+
+`CreateDebrisWave` emits ordered surface-aware debris from one shared `Think` scheduler. It does not create timers or per-step closures. Configure `origin`, `direction`, `spreadAxis`, `count`, `delay`, `interval`, `maxStepsPerFrame`, `distanceStep`, `spread`, `integerSpread`, `lifetime`, `preserveCount`, `surface`, `material`, `materialType`, and `modelPath`. Set `floor` to a table to trace beneath each step, anchor debris to the hit position, and sample that floor's material and model family. Floor traces include water by default, and water hits emit splash layers instead of models. Use the nested `water` table to tune the per-step water strength and the same settings accepted by `CreateWaterDebris`, or set `water = false` to disable water effects. Set `floor.water = false` to exclude water from the trace mask. Steps without a valid supporting surface are skipped. Displacements without a usable texture name use the sampled surface color as an entity tint; set `colorFallback = false` to disable that fallback. Other floor options are `startHeight`, `depth`, `offset`, `minNormalZ`, `mask`, `filter`, `collisionGroup`, `ignoreWorld`, `rejectSky`, and `rejectNoDraw`. The nested `prop` and `model` tables configure offsets, scale ranges, angles, physics velocity, jitter, collision, and setup callbacks. Step-indexed `events` still run for skipped steps. The `onStart`, `onStep`, `onComplete`, and `onCancel` callbacks provide lifecycle control; `onStep` receives a nil position when the floor trace rejects a step. The returned Debris Wave supports `Pause`, `Resume`, `Cancel`, `IsActive`, `GetProgress`, `GetSpawnedCount`, and `GetSkippedCount`.
 
 ```lua
 print(gebLib.Visuals.GetDebrisCount())
@@ -352,9 +371,6 @@ Entity helpers remain available for living-entity checks, looking direction, nea
 
 The focused helper methods are:
 
-- `weapon:gebLib_IsCarried()`
-- `player:gebLib_ValidAndAlive()`
-- `entity:gebLib_IsPerson()`, `gebLib_IsProp()`, `gebLib_IsItem()`, and `gebLib_Alive()`
 - `entity:gebLib_IsLookingAt(position, minimumDot)` and `gebLib_CheckSides(distance, filter)`
 - `entity:gebLib_PositionEmpty(position, filter)` and `gebLib_FindEmptyPosition(position, distance, step, filter)`
 - `entity:gebLib_GetBoneHitBox(bone)` and `gebLib_Dissolve(delay)`

@@ -3,6 +3,12 @@ gebLib.Action.__index = gebLib.Action
 
 local Action = gebLib.Action
 
+local Runtime = gebLib._Runtime
+if not Runtime then
+    local loader = include or function(path) return assert(loadfile("lua/" .. path))() end
+    Runtime = loader("geblib/runtime.lua")
+end
+
 gebLib._NextActionId = gebLib._NextActionId or 0
 
 local function nextId()
@@ -14,6 +20,47 @@ local function resetEvents(action)
     for _, event in pairs(action.Events) do
         event.played = false
     end
+end
+
+local function failAction(action)
+    action:Remove()
+end
+
+local function runActionCallback(action, label, callback)
+    return Runtime.Invoke(action, "Action " .. action.Id .. " " .. label, callback, failAction, action)
+end
+
+local function stepAction(action)
+    if action.Removed then return false end
+    if not IsValid(action.Entity) then
+        action:Remove()
+        return false
+    end
+    if not action.Playing then return true end
+
+    local now = CurTime()
+    if now < action.StartTime then return true end
+
+    for index = 1, #action.EventOrder do
+        local event = action.Events[action.EventOrder[index]]
+        if event and not event.played and now >= action.StartTime + event.time / action.TimeScale then
+            event.played = true
+            if not runActionCallback(action, "event " .. action.EventOrder[index], event.callback) then return false end
+            if action.Removed or not action.Playing then return not action.Removed end
+        end
+    end
+
+    if now < action.StartTime + action.Duration / action.TimeScale then return true end
+
+    if action.Repetitions == -1 or action.RepeatedFor < action.Repetitions then
+        action.RepeatedFor = action.RepeatedFor + 1
+        action.StartTime = now
+        resetEvents(action)
+        return true
+    end
+
+    action:Stop()
+    return false
 end
 
 function Action.New(entity, duration)
@@ -35,6 +82,7 @@ function Action.New(entity, duration)
     action.Entity = entity
     action.Duration = duration
     action.Events = {}
+    action.EventOrder = {}
     action.TimeScale = 1
     action.Repetitions = 0
     action.RepeatedFor = 0
@@ -68,38 +116,12 @@ function Action:Start(repetitions, delay)
     self.Playing = true
     resetEvents(self)
 
-    if self.OnStartCallback then
-        self.OnStartCallback(self)
-        if self.Removed then return false end
+    if self.OnStartCallback and not runActionCallback(self, "start callback", self.OnStartCallback) then
+        return false
     end
+    if self.Removed then return false end
 
-    hook.Add("Think", self.HookName, function()
-        if self.Removed then return end
-        if not IsValid(self.Entity) then self:Remove() return end
-        if not self.Playing then return end
-
-        local now = CurTime()
-        if now < self.StartTime then return end
-
-        for _, event in pairs(self.Events) do
-            if not event.played and now >= self.StartTime + event.time / self.TimeScale then
-                event.played = true
-                event.callback(self)
-                if self.Removed or not self.Playing then return end
-            end
-        end
-
-        if now < self.StartTime + self.Duration / self.TimeScale then return end
-
-        if self.Repetitions == -1 or self.RepeatedFor < self.Repetitions then
-            self.RepeatedFor = self.RepeatedFor + 1
-            self.StartTime = now
-            resetEvents(self)
-            return
-        end
-
-        self:Stop()
-    end)
+    Runtime.Register(self, "Action " .. self.Id, stepAction, failAction, failAction)
 
     return true
 end
@@ -126,12 +148,12 @@ end
 function Action:Remove()
     if self.Removed then return false end
 
-    hook.Remove("Think", self.HookName)
+    Runtime.Unregister(self)
     self.Playing = false
     self.Removed = true
 
     if self.OnRemoveCallback then
-        self.OnRemoveCallback(self)
+        Runtime.Invoke(self, "Action " .. self.Id .. " remove callback", self.OnRemoveCallback, nil, self)
     end
 
     return true
@@ -191,7 +213,23 @@ function Action:AddEvent(name, time, callback)
         error("action event callback must be a function", 2)
     end
 
-    self.Events[name] = {time = time, callback = callback, played = false}
+    local event = self.Events[name]
+    if not event then
+        event = {}
+        self.Events[name] = event
+        self.EventOrder[#self.EventOrder + 1] = name
+    end
+
+    event.time = time
+    event.callback = callback
+    event.played = false
+
+    table.sort(self.EventOrder, function(leftName, rightName)
+        local left = self.Events[leftName]
+        local right = self.Events[rightName]
+        if left.time == right.time then return leftName < rightName end
+        return left.time < right.time
+    end)
 end
 
 function Action:ReloadEvent(name)

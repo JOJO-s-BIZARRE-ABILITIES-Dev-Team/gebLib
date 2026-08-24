@@ -24,6 +24,8 @@ function gebLib.PrintDebug(...)
 end
 
 local sharedFiles = {
+    "geblib/runtime.lua",
+    "geblib/net_profile.lua",
     "geblib/net.lua",
     "geblib/entities.lua",
     "geblib/action.lua",
@@ -41,12 +43,25 @@ local clientFiles = {
     "geblib/visuals.lua",
 }
 
+local clientSupportFiles = {
+    "geblib/visuals_surface.lua",
+    "geblib/visuals_config.lua",
+    "geblib/visuals_runtime.lua",
+    "geblib/visuals_profile.lua",
+    "geblib/visuals_wave.lua",
+    "geblib/visuals_decal.lua",
+}
+
 if SERVER then
     for _, path in ipairs(sharedFiles) do
         AddCSLuaFile(path)
     end
 
     for _, path in ipairs(clientFiles) do
+        AddCSLuaFile(path)
+    end
+
+    for _, path in ipairs(clientSupportFiles) do
         AddCSLuaFile(path)
     end
 end

@@ -22,6 +22,9 @@ A player-focused frame timeline that controls view presentation.
 **Transient Visual**:
 A client-only debris model or decal with a finite lifetime.
 
+**Debris Wave**:
+A controllable Transient Visual that emits ordered debris steps over time from one shared frame scheduler.
+
 **Network Message**:
 A named, directional packet with one shared ordered schema and one receiving callback.
 
@@ -40,6 +43,7 @@ Opt-in observations about packet and record size, frequency, recipients, repeate
 - An **Applied Status Effect** belongs to exactly one living entity.
 - An **Action**, **Animation**, and **Cinematic Camera** each own their lifecycle independently.
 - A **Transient Visual** exists only on the client that creates it.
+- A **Debris Wave** owns its emission progress and may be paused, resumed, or cancelled independently.
 - A **Network Message** is either server-to-client or client-to-server.
 - A **Network Message** owns an ordered list of **Network Codecs**.
 - A **Network Batch** belongs to one batch-enabled Network Message and preserves record order.

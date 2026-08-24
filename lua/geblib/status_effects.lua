@@ -3,34 +3,71 @@ local Entity = FindMetaTable("Entity")
 local StatusEffects = gebLib.StatusEffects or {}
 gebLib.StatusEffects = StatusEffects
 
-StatusEffects.Definitions = StatusEffects.Definitions or {}
-StatusEffects.ActiveEntities = StatusEffects.ActiveEntities or setmetatable({}, {__mode = "k"})
+local Runtime = gebLib._Runtime
+if not Runtime then
+    local loader = include or function(path) return assert(loadfile("lua/" .. path))() end
+    Runtime = loader("geblib/runtime.lua")
+end
 
-local definitions = StatusEffects.Definitions
-local activeEntities = StatusEffects.ActiveEntities
+local state = gebLib._StatusEffectsState or {
+    definitions = {},
+    definitionViews = setmetatable({}, {__mode = "k"}),
+    entityEffects = setmetatable({}, {__mode = "k"}),
+    activeEntities = setmetatable({}, {__mode = "k"}),
+    effectDefinitions = setmetatable({}, {__mode = "k"}),
+}
+gebLib._StatusEffectsState = state
+
+local definitions = state.definitions
+local definitionViews = state.definitionViews
+local entityEffects = state.entityEffects
+local activeEntities = state.activeEntities
+local effectDefinitions = state.effectDefinitions
 
 local function validateDefinition(name, definition)
     if not isstring(name) or name == "" then
         error("status effect name must be a non-empty string", 3)
     end
-
     if not istable(definition) then
         error("status effect definition must be a table", 3)
     end
 
     local callbacks = {"onApply", "onTick", "onReapply", "onRemove"}
-    for _, callbackName in ipairs(callbacks) do
+    for index = 1, #callbacks do
+        local callbackName = callbacks[index]
         local callback = definition[callbackName]
         if callback ~= nil and not isfunction(callback) then
             error(callbackName .. " must be a function", 3)
         end
     end
 
-    if definition.interval ~= nil then
-        if not isnumber(definition.interval) or definition.interval < 0 then
-            error("status effect interval must be zero or greater", 3)
-        end
+    if definition.interval ~= nil
+        and (not isnumber(definition.interval) or definition.interval < 0)
+    then
+        error("status effect interval must be zero or greater", 3)
     end
+end
+
+local function ownDefinition(definition)
+    local owned = {}
+    for key, value in pairs(definition) do owned[key] = value end
+    if owned.interval == nil then owned.interval = 1 end
+    return owned
+end
+
+local function viewDefinition(definition)
+    local view = definitionViews[definition]
+    if view then return view end
+
+    view = setmetatable({}, {
+        __index = definition,
+        __newindex = function()
+            error("status effect definitions are immutable after registration", 2)
+        end,
+        __metatable = false,
+    })
+    definitionViews[definition] = view
+    return view
 end
 
 local function isLivingEntity(entity)
@@ -44,16 +81,34 @@ local function isAlive(entity)
 end
 
 local function effectMap(entity, create)
-    local effects = entity.gebLib_StatusEffects
+    local effects = entityEffects[entity]
     if effects or not create then return effects end
 
     effects = {}
-    entity.gebLib_StatusEffects = effects
+    entityEffects[entity] = effects
     activeEntities[entity] = true
     return effects
 end
 
-local function removeEffect(entity, name, reason)
+local removeEffect
+
+local function runEffectCallback(effect, callbackName, ...)
+    local definition = effectDefinitions[effect]
+    local callback = definition and definition[callbackName]
+    if not callback then return true end
+
+    return Runtime.Invoke(
+        effect,
+        "Applied Status Effect " .. tostring(effect.name) .. " " .. callbackName,
+        callback,
+        function(current)
+            if current.target then removeEffect(current.target, current.name, "callback error") end
+        end,
+        ...
+    )
+end
+
+removeEffect = function(entity, name, reason)
     local effects = effectMap(entity, false)
     local effect = effects and effects[name]
     if not effect or effect.removing then return false end
@@ -62,13 +117,22 @@ local function removeEffect(entity, name, reason)
     effects[name] = nil
 
     if next(effects) == nil then
-        entity.gebLib_StatusEffects = nil
+        entityEffects[entity] = nil
         activeEntities[entity] = nil
     end
 
-    local onRemove = effect.definition.onRemove
-    if onRemove then
-        onRemove(entity, effect, reason or "removed")
+    local definition = effectDefinitions[effect]
+    effectDefinitions[effect] = nil
+    if definition and definition.onRemove then
+        Runtime.Invoke(
+            effect,
+            "Applied Status Effect " .. tostring(name) .. " onRemove",
+            definition.onRemove,
+            nil,
+            entity,
+            effect,
+            reason or "removed"
+        )
     end
 
     return true
@@ -76,12 +140,14 @@ end
 
 function StatusEffects.Register(name, definition)
     validateDefinition(name, definition)
-    definitions[name] = definition
-    return definition
+    local owned = ownDefinition(definition)
+    definitions[name] = owned
+    return viewDefinition(owned)
 end
 
 function StatusEffects.Get(name)
-    return definitions[name]
+    local definition = definitions[name]
+    return definition and viewDefinition(definition) or nil
 end
 
 function StatusEffects.Unregister(name)
@@ -90,21 +156,16 @@ end
 
 function Entity:gebLib_ApplyStatusEffect(name, duration, level, source, inflictor)
     local definition = definitions[name]
-    if not definition then
-        error("unknown status effect: " .. tostring(name), 2)
-    end
-
+    if not definition then error("unknown status effect: " .. tostring(name), 2) end
     if not isLivingEntity(self) then
         error("status effects can only be applied to living entities", 2)
     end
 
     duration = duration or 0
     level = level or 1
-
     if not isnumber(duration) or duration < 0 then
         error("status effect duration must be zero or greater", 2)
     end
-
     if not isnumber(level) or level < 1 then
         error("status effect level must be one or greater", 2)
     end
@@ -114,19 +175,26 @@ function Entity:gebLib_ApplyStatusEffect(name, duration, level, source, inflicto
     local current = effects[name]
 
     if current then
-        local onReapply = definition.onReapply
-        if onReapply and onReapply(self, current, duration, level, source, inflictor) then
-            return effects[name]
+        local currentDefinition = effectDefinitions[current]
+        local handled = false
+        if currentDefinition and currentDefinition.onReapply then
+            local ok, callbackHandled = runEffectCallback(
+                current,
+                "onReapply",
+                self,
+                current,
+                duration,
+                level,
+                source,
+                inflictor
+            )
+            if not ok then return effects[name] end
+            handled = callbackHandled == true
         end
+        if handled then return effects[name] end
+        if effects[name] ~= current then return effects[name] end
 
-        if effects[name] ~= current then
-            return effects[name]
-        end
-
-        if level < current.level then
-            return current
-        end
-
+        if level < current.level then return current end
         if level == current.level then
             local newExpiration = duration == math.huge and math.huge or now + duration
             if newExpiration > current.expiresAt then
@@ -142,9 +210,6 @@ function Entity:gebLib_ApplyStatusEffect(name, duration, level, source, inflicto
         if effects[name] then return effects[name] end
     end
 
-    local interval = definition.interval
-    if interval == nil then interval = 1 end
-
     local effect = {
         name = name,
         target = self,
@@ -153,19 +218,17 @@ function Entity:gebLib_ApplyStatusEffect(name, duration, level, source, inflicto
         level = level,
         appliedAt = now,
         expiresAt = duration == math.huge and math.huge or now + duration,
-        nextTickAt = now + interval,
-        definition = definition,
+        nextTickAt = now + definition.interval,
     }
 
     effects[name] = effect
+    effectDefinitions[effect] = definition
 
     if definition.onApply then
-        definition.onApply(self, effect)
+        local ok = runEffectCallback(effect, "onApply", self, effect)
+        if not ok then return effects[name] end
     end
-
-    if effects[name] ~= effect then
-        return effects[name]
-    end
+    if effects[name] ~= effect then return effects[name] end
 
     if duration == 0 then
         removeEffect(self, name, "expired")
@@ -185,7 +248,12 @@ function Entity:gebLib_GetStatusEffect(name)
 end
 
 function Entity:gebLib_GetStatusEffects()
-    return effectMap(self, false) or {}
+    local snapshot = {}
+    local effects = effectMap(self, false)
+    if effects then
+        for name, effect in pairs(effects) do snapshot[name] = effect end
+    end
+    return snapshot
 end
 
 function Entity:gebLib_HasStatusEffect(name)
@@ -197,17 +265,12 @@ function Entity:gebLib_ClearStatusEffects(reason)
     if not effects then return 0 end
 
     local names = {}
-    for name in pairs(effects) do
-        names[#names + 1] = name
-    end
+    for name in pairs(effects) do names[#names + 1] = name end
 
     local removed = 0
-    for _, name in ipairs(names) do
-        if removeEffect(self, name, reason or "cleared") then
-            removed = removed + 1
-        end
+    for index = 1, #names do
+        if removeEffect(self, names[index], reason or "cleared") then removed = removed + 1 end
     end
-
     return removed
 end
 
@@ -216,31 +279,26 @@ hook.Add("Tick", "gebLib.StatusEffects", function()
 
     for entity in pairs(activeEntities) do
         local effects = effectMap(entity, false)
-
         if not IsValid(entity) then
             activeEntities[entity] = nil
+            entityEffects[entity] = nil
         elseif effects then
             local names = {}
-            for name in pairs(effects) do
-                names[#names + 1] = name
-            end
+            for name in pairs(effects) do names[#names + 1] = name end
 
-            for _, name in ipairs(names) do
+            for index = 1, #names do
+                local name = names[index]
                 local effect = effects[name]
-
                 if effect then
                     if not isAlive(entity) then
                         removeEffect(entity, name, "death")
                     elseif now >= effect.expiresAt then
                         removeEffect(entity, name, "expired")
-                    else
-                        local onTick = effect.definition.onTick
-                        if onTick and now >= effect.nextTickAt then
-                            local interval = effect.definition.interval
-                            if interval == nil then interval = 1 end
-
-                            effect.nextTickAt = interval == 0 and now or now + interval
-                            onTick(entity, effect)
+                    elseif now >= effect.nextTickAt then
+                        local definition = effectDefinitions[effect]
+                        if definition then
+                            effect.nextTickAt = definition.interval == 0 and now or now + definition.interval
+                            runEffectCallback(effect, "onTick", entity, effect)
                         end
                     end
                 end

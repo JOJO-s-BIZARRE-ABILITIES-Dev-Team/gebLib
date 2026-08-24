@@ -10,6 +10,8 @@ local propClasses = {
     prop_ragdoll = true,
 }
 
+-- Compatibility aliases retained for existing addons. New code should use the
+-- deeper spatial, hitbox, and dissolve helpers below instead of adding aliases.
 function Weapon:gebLib_IsCarried()
     return IsValid(self:GetOwner())
 end
@@ -35,6 +37,8 @@ function Entity:gebLib_Alive()
     if self:IsPlayer() then return self:Alive() end
     return self:Health() > 0
 end
+
+-- Helpers below hide reusable Garry's Mod behavior rather than renaming one call.
 
 function Entity:gebLib_IsLookingAt(position, minimumDot)
     minimumDot = minimumDot or 0.9

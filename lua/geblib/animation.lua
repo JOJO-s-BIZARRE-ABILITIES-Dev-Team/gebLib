@@ -4,6 +4,95 @@ gebLib.Animation.__index = gebLib.Animation
 local Animation = gebLib.Animation
 gebLib._NextAnimationId = gebLib._NextAnimationId or 0
 
+local Runtime = gebLib._Runtime
+if not Runtime then
+    local loader = include or function(path) return assert(loadfile("lua/" .. path))() end
+    Runtime = loader("geblib/runtime.lua")
+end
+
+local function failAnimation(animation)
+    animation:Remove()
+end
+
+local function runAnimationCallback(animation, label, callback)
+    return Runtime.Invoke(
+        animation,
+        "Animation " .. tostring(animation.Sequence) .. " " .. label,
+        callback,
+        failAnimation,
+        animation
+    )
+end
+
+local function runAnimationEvents(animation, playback)
+    local order = animation.EventOrder
+    local first = playback > 0 and 1 or #order
+    local last = playback > 0 and #order or 1
+    local increment = playback > 0 and 1 or -1
+
+    for index = first, last, increment do
+        local name = order[index]
+        local event = animation.Events[name]
+        local due = playback > 0 and animation:GetFrame() >= event.Frame
+            or playback < 0 and animation:GetFrame() <= event.Frame
+
+        if due and not event.Played then
+            event.Played = true
+            if not runAnimationCallback(animation, "event " .. name, event.Function) then return false end
+            if animation.Removed or not animation.Playing then return not animation.Removed end
+        end
+    end
+
+    return true
+end
+
+local function stepAnimation(animation)
+    if not IsValid(animation.Entity) then
+        animation:Remove()
+        return false
+    end
+
+    if animation.Frames <= 0 or not animation:IsValid() or not animation:IsActive() then
+        animation.Playing = false
+        return false
+    end
+    if not animation.Playing then return true end
+
+    local playback = animation:GetPlayback()
+    if playback == 0 then return true end
+
+    if animation:GetCycle() >= 0 and animation:GetCycle() <= 0.1 and animation.NewLoop then
+        animation.NewLoop = false
+        animation:ReloadEvents()
+    end
+
+    if animation.Init and not animation.Initialized then
+        animation.Initialized = true
+        if not runAnimationCallback(animation, "init callback", animation.Init) then return false end
+        if animation.Removed or not animation.Playing then return not animation.Removed end
+    end
+
+    if not runAnimationEvents(animation, playback) then return false end
+
+    if playback > 0 then
+        if animation:GetCycle() >= 1 and not animation.Looped then
+            animation:Stop()
+            if animation.End then runAnimationCallback(animation, "end callback", animation.End) end
+            return false
+        elseif animation:GetCycle() >= 0.9 and animation.Looped then
+            animation.NewLoop = true
+        end
+    elseif animation:GetCycle() <= 0 and not animation.Looped then
+        animation:Stop()
+        if animation.End then runAnimationCallback(animation, "end callback", animation.End) end
+        return false
+    elseif animation:GetCycle() <= 0 and animation.Looped then
+        animation:ReloadEvents()
+    end
+
+    return true
+end
+
 function Animation.New(entity, sequence)
     if not IsValid(entity) then
         error("Cannot create a gebLib animation for an invalid entity")
@@ -26,6 +115,7 @@ function Animation.New(entity, sequence)
     self.Init = nil
     self.End = nil
     self.Events = {}
+    self.EventOrder = {}
     self.ThinkName = nil
     self.HookName = "gebLib.Animation." .. gebLib._NextAnimationId
     self.Initialized = false
@@ -71,69 +161,8 @@ function Animation:Play(playback)
         self.NewLoop = false
         self:ReloadEvents()
 
-        local thinkName = self.HookName
-        self.ThinkName = thinkName
-
-        hook.Add("Think", thinkName, function()
-            if not IsValid(self.Entity) then self:Remove() return end
-            if self.Frames <= 0 or not self:IsValid() or not self:IsActive() then
-                self.Playing = false
-                hook.Remove("Think", thinkName)
-                return
-            end
-            if self:GetPlayback() == 0 then return end
-
-            if self:GetCycle() >= 0 and self:GetCycle() <= 0.1 and self.NewLoop then
-                self.NewLoop = false
-                self:ReloadEvents()
-            end
-
-            --Run the init function of the animation when the cycle is 0
-            if self.Init and not self.Initialized then
-                self.Initialized = true
-                self.Init(self)
-                if self.Removed or not self.Playing then return end
-            end
-
-            --Check for animation events
-            if self:HasEvents() then
-                for _, event in pairs(self.Events) do
-                    if self:GetPlayback() > 0 then
-                        if self:GetFrame() >= event.Frame and not event.Played then
-                            event.Played = true
-                            event.Function(self)
-                            if self.Removed or not self.Playing then return end
-                        end
-                    elseif self:GetPlayback() < 0 then
-                        if self:GetFrame() <= event.Frame and not event.Played then
-                            event.Played = true
-                            event.Function(self)
-                            if self.Removed or not self.Playing then return end
-                        end
-                    end
-                end    
-            end
-
-            --End of the animation
-            if self:GetPlayback() > 0 then
-                if self:GetCycle() >= 1 and not self.Looped then
-                    self.Playing = false
-                    self.Initialized = false
-
-                    self:Stop()
-                    if self.End then self.End(self) end
-                elseif self:GetCycle() >= 0.9 and self.Looped then --Different function when the animation is looped
-                    self.NewLoop = true
-                end
-            else --Animations that play in reverse
-                if self:GetCycle() <= 0 and not self.Looped then
-                    self:Stop()
-                    if self.End then self.End(self) end
-                elseif self:GetCycle() <= 0 and self.Looped then --Different function when the animation is looped
-                    self:ReloadEvents()
-                end
-            end
-        end)
+        self.ThinkName = self.HookName
+        Runtime.Register(self, "Animation " .. tostring(sequence), stepAnimation, failAnimation, failAnimation)
         entity:ResetSequence(sequence)
         entity:ResetSequenceInfo()
         entity:SetPlaybackRate(playback)
@@ -170,9 +199,7 @@ function Animation:Resume(playback)
 end
 
 function Animation:Stop()
-    if self.ThinkName then
-        hook.Remove("Think", self.ThinkName)
-    end
+    Runtime.Unregister(self)
 
     if self:IsActive() then
         self.Entity:ResetSequenceInfo()
@@ -207,7 +234,22 @@ function Animation:AddEvent(name, frame, func)
         error("animation event callback must be a function", 2)
     end
 
-    self.Events[name] = {Frame = frame, Function = func, Played = false}
+    local event = self.Events[name]
+    if not event then
+        event = {}
+        self.Events[name] = event
+        self.EventOrder[#self.EventOrder + 1] = name
+    end
+
+    event.Frame = frame
+    event.Function = func
+    event.Played = false
+    table.sort(self.EventOrder, function(leftName, rightName)
+        local left = self.Events[leftName]
+        local right = self.Events[rightName]
+        if left.Frame == right.Frame then return leftName < rightName end
+        return left.Frame < right.Frame
+    end)
     gebLib.PrintDebug("Successfully added an event on " .. tostring(frame) .. ". frame!")
 end
 
