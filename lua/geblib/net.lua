@@ -12,6 +12,7 @@ Message.__index = Message
 
 Net._Messages = Net._Messages or {}
 Net._Profile = Net._Profile or {messages = {}}
+Net._PendingBatchMessages = {}
 
 local function fail(message, level)
     error("[gebLib.Net] " .. message, (level or 1) + 1)
@@ -93,6 +94,8 @@ local function simpleCodec(kind, signature, bits, accepts, writer, reader)
         MinBits = bits,
         MaxBits = bits,
         Accepts = accepts,
+        NeedsReadValidation = kind == "float" or kind == "double"
+            or kind == "entity" or kind == "player",
         Validate = function(self, value, path)
             if not self.Accepts(value) then
                 fail(path .. " must be " .. self.Signature, 2)
@@ -101,6 +104,7 @@ local function simpleCodec(kind, signature, bits, accepts, writer, reader)
         Write = function(_, value)
             writer(value)
         end,
+        ReadUnchecked = reader,
         Read = function(self)
             requireBits(self.MinBits)
             return reader()
@@ -214,12 +218,14 @@ function Net.UInt(bits)
         Accepts = function(value)
             return isInteger(value) and value >= 0 and value <= maximum
         end,
+        NeedsReadValidation = false,
         Validate = function(self, value, path)
             if not self.Accepts(value) then
                 fail(path .. " must be an integer from 0 to " .. maximum, 2)
             end
         end,
         Write = function(_, value) net.WriteUInt(value, bits) end,
+        ReadUnchecked = function() return net.ReadUInt(bits) end,
         Read = function()
             requireBits(bits)
             return net.ReadUInt(bits)
@@ -247,12 +253,14 @@ function Net.Int(bits)
         Accepts = function(value)
             return isInteger(value) and value >= minimum and value <= maximum
         end,
+        NeedsReadValidation = false,
         Validate = function(self, value, path)
             if not self.Accepts(value) then
                 fail(path .. " must be an integer from " .. minimum .. " to " .. maximum, 2)
             end
         end,
         Write = function(_, value) net.WriteInt(value, bits) end,
+        ReadUnchecked = function() return net.ReadInt(bits) end,
         Read = function()
             requireBits(bits)
             return net.ReadInt(bits)
@@ -283,12 +291,14 @@ function Net.Range(minimum, maximum)
         Accepts = function(value)
             return isInteger(value) and value >= minimum and value <= maximum
         end,
+        NeedsReadValidation = false,
         Validate = function(self, value, path)
             if not self.Accepts(value) then
                 fail(path .. " must be an integer from " .. minimum .. " to " .. maximum, 2)
             end
         end,
         Write = function(_, value) net.WriteUInt(value - minimum, bits) end,
+        ReadUnchecked = function() return net.ReadUInt(bits) + minimum end,
         Read = function()
             requireBits(bits)
             return net.ReadUInt(bits) + minimum
@@ -313,6 +323,7 @@ function Net.String(maxBytes)
         Accepts = function(value)
             return isString(value) and #value <= maxBytes
         end,
+        NeedsReadValidation = false,
         Validate = function(self, value, path)
             if not isString(value) then
                 fail(path .. " must be a string", 2)
@@ -349,6 +360,7 @@ function Net.Optional(inner)
         Accepts = function(value)
             return value == nil or inner.Accepts(value)
         end,
+        NeedsReadValidation = inner.NeedsReadValidation == true,
         Validate = function(_, value, path)
             if value ~= nil then inner:Validate(value, path) end
         end,
@@ -406,6 +418,7 @@ function Net.Array(inner, maxCount)
 
             return true
         end,
+        NeedsReadValidation = inner.NeedsReadValidation == true,
         Validate = function(_, value, path)
             local length = arrayLength(value)
             if not length then fail(path .. " must be a sequential array", 2) end
@@ -437,11 +450,13 @@ function Net.OneOf(choices)
     end
 
     local maximumBits = 0
+    local needsReadValidation = false
     local signatures = {}
 
     for index, choice in ipairs(choices) do
         assertCodec(choice, "OneOf choice #" .. index)
         maximumBits = math.max(maximumBits, choice.MaxBits)
+        needsReadValidation = needsReadValidation or choice.NeedsReadValidation == true
         signatures[index] = choice.Signature
     end
 
@@ -461,6 +476,7 @@ function Net.OneOf(choices)
         MinBits = tagBits,
         MaxBits = tagBits + maximumBits,
         Accepts = function(value) return findChoice(value) ~= nil end,
+        NeedsReadValidation = needsReadValidation,
         Validate = function(_, value, path)
             if not findChoice(value) then
                 fail(path .. " does not match any allowed codec", 2)
@@ -492,8 +508,21 @@ if SERVER and not profileConVar and CreateConVar then
     )
 end
 
+local profileActive = profileConVar and profileConVar.GetBool and profileConVar:GetBool() or false
+
 local function profileEnabled()
-    return profileConVar and profileConVar.GetBool and profileConVar:GetBool()
+    return profileActive
+end
+
+if SERVER and cvars and cvars.AddChangeCallback then
+    if cvars.RemoveChangeCallback then
+        cvars.RemoveChangeCallback("geblib_net_profile", "gebLib.Net.Profile")
+    end
+
+    cvars.AddChangeCallback("geblib_net_profile", function(_, _, value)
+        local numeric = tonumber(value)
+        profileActive = numeric and numeric ~= 0 or value == "true"
+    end, "gebLib.Net.Profile")
 end
 
 local function profileNow()
@@ -515,6 +544,7 @@ local function getMessageStats(message)
         stats = {
             message = message,
             count = 0,
+            records = 0,
             totalBits = 0,
             totalWireBits = 0,
             totalRecipients = 0,
@@ -524,6 +554,8 @@ local function getMessageStats(message)
             fields = {},
         }
         profile.messages[message.Name] = stats
+    else
+        stats.records = stats.records or stats.count or 0
     end
 
     return stats
@@ -678,9 +710,9 @@ local function maybeWarn(messageStats, fieldIndex, codec, fieldStats)
 
     fieldStats.warned = true
     local elapsed = math.max(profileNow() - Net._Profile.startedAt, 0.001)
-    local packetsPerMinute = messageStats.count / elapsed * 60
+    local recordsPerMinute = fieldStats.count / elapsed * 60
     local recipients = messageStats.count > 0 and messageStats.totalRecipients / messageStats.count or 1
-    local savedKiB = savedBits * packetsPerMinute * recipients / 8192
+    local savedKiB = savedBits * recordsPerMinute * recipients / 8192
 
     profilePrint(
         messageStats.message.Name .. " field #" .. fieldIndex .. " (" .. codec.Signature .. "): "
@@ -688,7 +720,7 @@ local function maybeWarn(messageStats, fieldIndex, codec, fieldStats)
     )
 end
 
-local function recordMessage(message, bits, recipients, values)
+local function recordPacket(message, bits, recipients, records)
     if not profileEnabled() or not SERVER then return end
 
     local profile = Net._Profile
@@ -697,27 +729,32 @@ local function recordMessage(message, bits, recipients, values)
 
     local stats = getMessageStats(message)
     stats.count = stats.count + 1
+    stats.records = stats.records + #records
     stats.totalBits = stats.totalBits + bits
     stats.totalRecipients = stats.totalRecipients + recipients
     stats.totalWireBits = stats.totalWireBits + bits * recipients
 
-    local fingerprints = {}
-    for index = 1, values.n do
-        local codec = message.Schema[index]
-        local fieldStats = stats.fields[index]
-        if not fieldStats then
-            fieldStats = {}
-            stats.fields[index] = fieldStats
+    for recordIndex = 1, #records do
+        local values = records[recordIndex]
+        local fingerprints = {}
+
+        for index = 1, values.n do
+            local codec = message.Schema[index]
+            local fieldStats = stats.fields[index]
+            if not fieldStats then
+                fieldStats = {}
+                stats.fields[index] = fieldStats
+            end
+
+            observeField(fieldStats, codec, values[index])
+            fingerprints[index] = fingerprint(values[index], 0)
+            maybeWarn(stats, index, codec, fieldStats)
         end
 
-        observeField(fieldStats, codec, values[index])
-        fingerprints[index] = fingerprint(values[index], 0)
-        maybeWarn(stats, index, codec, fieldStats)
+        local currentFingerprint = table.concat(fingerprints, "|")
+        if currentFingerprint == stats.lastFingerprint then stats.repeated = stats.repeated + 1 end
+        stats.lastFingerprint = currentFingerprint
     end
-
-    local currentFingerprint = table.concat(fingerprints, "|")
-    if currentFingerprint == stats.lastFingerprint then stats.repeated = stats.repeated + 1 end
-    stats.lastFingerprint = currentFingerprint
 end
 
 local function recordDrop(message, kind)
@@ -749,16 +786,27 @@ function Net.ReportProfile()
         local kib = stats.totalWireBits / 8192
         local rate = elapsed > 0 and stats.count / elapsed or 0
         local averageBits = stats.count > 0 and stats.totalBits / stats.count or 0
-        local repeated = stats.count > 0 and stats.repeated / stats.count * 100 or 0
+        local repeated = stats.records > 0 and stats.repeated / stats.records * 100 or 0
+        local recipients = stats.count > 0 and stats.totalRecipients / stats.count or 0
+        local recordText = stats.records ~= stats.count and ", " .. stats.records .. " records" or ""
 
         profilePrint(
-            stats.message.Name .. ": " .. stats.count .. " packets, "
+            stats.message.Name .. ": " .. stats.count .. " packets" .. recordText .. ", "
                 .. string.format("%.2f", rate) .. "/s, "
                 .. string.format("%.1f", averageBits) .. " bits average, "
+                .. string.format("%.1f", recipients) .. " recipients average, "
                 .. string.format("%.2f", kib) .. " KiB total, "
                 .. string.format("%.1f", repeated) .. "% consecutive repeats, "
                 .. stats.rateLimited .. " rate-limited, " .. stats.malformed .. " malformed"
         )
+
+        if not stats.message.BatchMaximum and stats.count >= 64 and rate >= 20 and averageBits <= 256 then
+            profilePrint("    suggestion: high-rate small packets; consider opt-in batching")
+        end
+
+        if stats.records >= 64 and repeated >= 25 then
+            profilePrint("    suggestion: repeated payloads; avoid sending unchanged state")
+        end
 
         for index, fieldStats in ipairs(stats.fields) do
             local codec = stats.message.Schema[index]
@@ -776,7 +824,7 @@ if SERVER and concommand and concommand.Add then
     concommand.Add("geblib_net_profile_reset", function() Net.ResetProfile() end)
 end
 
-local function validateSchema(schema)
+local function compileSchema(name, schema)
     if not isTable(schema) then fail("message schema must be an array", 3) end
 
     local length = #schema
@@ -787,20 +835,45 @@ local function validateSchema(schema)
     end
 
     local signatures = {}
+    local validators = {}
+    local writers = {}
+    local readers = {}
+    local readValidators = {}
+    local labels = {}
+    local minimumBits = 0
     local maximumBits = 0
+    local fixedSize = true
 
     for index = 1, length do
         local codec = schema[index]
         assertCodec(codec, "schema field #" .. index)
         signatures[index] = codec.Signature
+        validators[index] = codec.Validate
+        writers[index] = codec.Write
+        readers[index] = codec.Read
+        readValidators[index] = codec.NeedsReadValidation and codec.Validate or false
+        labels[index] = name .. " field #" .. index
+        minimumBits = minimumBits + codec.MinBits
         maximumBits = maximumBits + codec.MaxBits
+        if codec.MinBits ~= codec.MaxBits or not codec.ReadUnchecked then fixedSize = false end
     end
 
     if maximumBits > MAX_PAYLOAD_BITS then
         fail("message schema can exceed the 60 KiB safety limit", 3)
     end
 
-    return table.concat(signatures, ";"), maximumBits
+    return {
+        signature = table.concat(signatures, ";"),
+        count = length,
+        validators = validators,
+        writers = writers,
+        readers = readers,
+        readValidators = readValidators,
+        labels = labels,
+        minimumBits = minimumBits,
+        maximumBits = maximumBits,
+        fixedSize = fixedSize,
+    }
 end
 
 local function validateOptions(direction, options)
@@ -808,7 +881,7 @@ local function validateOptions(direction, options)
     if not isTable(options) then fail("message options must be a table", 3) end
 
     for key in pairs(options) do
-        if key ~= "unreliable" and key ~= "rate" and key ~= "burst" then
+        if key ~= "unreliable" and key ~= "rate" and key ~= "burst" and key ~= "batch" then
             fail("unknown message option " .. tostring(key), 3)
         end
     end
@@ -816,12 +889,22 @@ local function validateOptions(direction, options)
     local unreliable = options.unreliable or false
     if not isBoolean(unreliable) then fail("unreliable must be a boolean", 3) end
 
+    local batch
+    if options.batch ~= nil and options.batch ~= false then
+        if not isInteger(options.batch) or options.batch < 2 or options.batch > 256 then
+            fail("batch must be an integer from 2 to 256", 3)
+        end
+        batch = options.batch
+    end
+
     if direction == TO_CLIENT then
         if options.rate ~= nil or options.burst ~= nil then
             fail("rate and burst are only valid for client-to-server messages", 3)
         end
-        return unreliable, nil, nil
+        return unreliable, nil, nil, batch
     end
+
+    if batch then fail("batch is only valid for server-to-client messages", 3) end
 
     if options.rate == nil then
         fail("client-to-server messages must set rate or rate = false", 3)
@@ -829,7 +912,7 @@ local function validateOptions(direction, options)
 
     if options.rate == false then
         if options.burst ~= nil then fail("burst requires a numeric rate", 3) end
-        return unreliable, false, false
+        return unreliable, false, false, nil
     end
 
     if not isFinite(options.rate) or options.rate <= 0 then
@@ -839,54 +922,63 @@ local function validateOptions(direction, options)
     local burst = options.burst or options.rate
     if not isFinite(burst) or burst < 1 then fail("burst must be at least 1", 3) end
 
-    return unreliable, options.rate, burst
+    return unreliable, options.rate, burst, nil
 end
 
-local function messageSignature(direction, schemaSignature, unreliable, rate, burst)
-    return table.concat({
+local function messageSignature(direction, schemaSignature, unreliable, rate, burst, batch)
+    local parts = {
         direction,
         schemaSignature,
         unreliable and "unreliable" or "reliable",
         tostring(rate),
         tostring(burst),
-    }, "|")
+    }
+    if batch then parts[#parts + 1] = "batch:" .. batch end
+    return table.concat(parts, "|")
 end
 
 local function valuesFromArguments(message, offset, ...)
-    local values = {n = #message.Schema}
+    local values = {n = message.FieldCount}
     for index = 1, values.n do values[index] = select(index + offset, ...) end
     return values
 end
 
 local function validateArguments(message, offset, ...)
     local received = select("#", ...) - offset
-    local expected = #message.Schema
+    local expected = message.FieldCount
 
     if received ~= expected then
         fail(message.Name .. " expects " .. expected .. " values, got " .. received, 3)
     end
 
-    for index, codec in ipairs(message.Schema) do
-        codec:Validate(select(index + offset, ...), message.Name .. " field #" .. index)
+    for index = 1, expected do
+        message.Validators[index](message.Schema[index], select(index + offset, ...), message.FieldLabels[index])
     end
 end
 
 local function writeArguments(message, offset, ...)
-    for index, codec in ipairs(message.Schema) do
-        codec:Write(select(index + offset, ...))
+    for index = 1, message.FieldCount do
+        message.Writers[index](message.Schema[index], select(index + offset, ...))
+    end
+end
+
+local function writeValues(message, values)
+    for index = 1, message.FieldCount do
+        message.Writers[index](message.Schema[index], values[index])
+    end
+end
+
+local function validateValues(message, values)
+    for index = 1, message.FieldCount do
+        message.Validators[index](message.Schema[index], values[index], message.FieldLabels[index])
     end
 end
 
 local function startMessage(message, offset, ...)
     validateArguments(message, offset, ...)
     net.Start(message.Name, message.Unreliable)
-
-    local ok, writeError = pcall(writeArguments, message, offset, ...)
-
-    if not ok then
-        if net.Abort then net.Abort() end
-        fail(message.Name .. " could not be encoded: " .. tostring(writeError), 3)
-    end
+    if message.BatchMaximum then net.WriteUInt(0, message.BatchBits) end
+    writeArguments(message, offset, ...)
 end
 
 local function writtenBits()
@@ -915,6 +1007,91 @@ local function recipientCount(recipients)
     return 1
 end
 
+local BROADCAST_BATCH = {}
+
+local function flushBatchGroup(message, group)
+    local records = group.records
+    if #records == 0 then return false end
+
+    for index = 1, #records do validateValues(message, records[index]) end
+
+    net.Start(message.Name, message.Unreliable)
+    net.WriteUInt(#records - 1, message.BatchBits)
+    for index = 1, #records do writeValues(message, records[index]) end
+
+    if profileEnabled() then
+        local recipients
+        if group.broadcast then
+            recipients = player and player.GetCount and player.GetCount() or 1
+        else
+            recipients = recipientCount(group.recipients)
+        end
+        recordPacket(message, writtenBits(), recipients, records)
+    end
+
+    if group.broadcast then
+        net.Broadcast()
+    else
+        net.Send(group.recipients)
+    end
+
+    return true
+end
+
+local function flushMessageBatches(message)
+    local pending = message.PendingBatches
+    if not pending then return 0 end
+
+    message.PendingBatches = {}
+    Net._PendingBatchMessages[message] = nil
+    local flushed = 0
+    for _, group in pairs(pending) do
+        if flushBatchGroup(message, group) then flushed = flushed + 1 end
+    end
+    return flushed
+end
+
+function Net.FlushBatches()
+    if not SERVER then return 0 end
+
+    local pending = Net._PendingBatchMessages
+    Net._PendingBatchMessages = {}
+    local flushed = 0
+    for message in pairs(pending) do
+        flushed = flushed + flushMessageBatches(message)
+    end
+    return flushed
+end
+
+if SERVER and hook and hook.Add then
+    hook.Add("Tick", "gebLib.Net.FlushBatches", Net.FlushBatches)
+end
+
+local function queueMessage(message, recipients, broadcast, offset, ...)
+    if not message.BatchMaximum then
+        fail(message.Name .. " must set the batch option before using Queue", 3)
+    end
+
+    validateArguments(message, offset, ...)
+    local values = valuesFromArguments(message, offset, ...)
+    local key = broadcast and BROADCAST_BATCH or recipients
+    local pending = message.PendingBatches
+    local group = pending[key]
+
+    if not group then
+        group = {recipients = recipients, broadcast = broadcast, records = {}}
+        pending[key] = group
+        Net._PendingBatchMessages[message] = true
+    end
+
+    group.records[#group.records + 1] = values
+    if #group.records >= message.BatchMaximum then
+        pending[key] = nil
+        flushBatchGroup(message, group)
+        if not next(pending) then Net._PendingBatchMessages[message] = nil end
+    end
+end
+
 function Message:Send(...)
     if self.Direction == TO_CLIENT then
         if not SERVER then fail(self.Name .. " can only be sent by the server", 2) end
@@ -922,9 +1099,12 @@ function Message:Send(...)
         local recipients = select(1, ...)
         if recipients == nil then fail(self.Name .. " requires recipients; use Broadcast for everyone", 2) end
 
+        if self.BatchMaximum then flushMessageBatches(self) end
         startMessage(self, 1, ...)
         if profileEnabled() then
-            recordMessage(self, writtenBits(), recipientCount(recipients), valuesFromArguments(self, 1, ...))
+            recordPacket(self, writtenBits(), recipientCount(recipients), {
+                valuesFromArguments(self, 1, ...),
+            })
         end
         net.Send(recipients)
         return
@@ -940,12 +1120,28 @@ function Message:Broadcast(...)
     if self.Direction ~= TO_CLIENT then fail(self.Name .. " is not a server-to-client message", 2) end
     if not SERVER then fail(self.Name .. " can only be broadcast by the server", 2) end
 
+    if self.BatchMaximum then flushMessageBatches(self) end
     startMessage(self, 0, ...)
     if profileEnabled() then
         local count = player and player.GetCount and player.GetCount() or 1
-        recordMessage(self, writtenBits(), count, valuesFromArguments(self, 0, ...))
+        recordPacket(self, writtenBits(), count, {
+            valuesFromArguments(self, 0, ...),
+        })
     end
     net.Broadcast()
+end
+
+function Message:Queue(recipients, ...)
+    if self.Direction ~= TO_CLIENT then fail(self.Name .. " is not a server-to-client message", 2) end
+    if not SERVER then fail(self.Name .. " can only be queued by the server", 2) end
+    if recipients == nil then fail(self.Name .. " requires recipients; use QueueBroadcast for everyone", 2) end
+    queueMessage(self, recipients, false, 0, ...)
+end
+
+function Message:QueueBroadcast(...)
+    if self.Direction ~= TO_CLIENT then fail(self.Name .. " is not a server-to-client message", 2) end
+    if not SERVER then fail(self.Name .. " can only be queued by the server", 2) end
+    queueMessage(self, nil, true, 0, ...)
 end
 
 function Message:Receive(callback)
@@ -986,21 +1182,43 @@ local function debugDrop(message, reason)
     end
 end
 
-local function decodeMessage(message)
-    local values = {n = #message.Schema}
+local function decodeRecord(message, unchecked)
+    local values = {n = message.FieldCount}
 
-    for index, codec in ipairs(message.Schema) do
-        local value = codec:Read()
-        codec:Validate(value, message.Name .. " field #" .. index)
+    for index = 1, message.FieldCount do
+        local codec = message.Schema[index]
+        local reader = unchecked and codec.ReadUnchecked or message.Readers[index]
+        local value = reader(codec)
+        local validate = message.ReadValidators[index]
+        if validate then validate(codec, value, message.FieldLabels[index]) end
         values[index] = value
     end
 
-    if net.BytesLeft then
+    return values
+end
+
+local function decodeMessage(message, length)
+    local count = 1
+    if message.BatchMaximum then
+        count = net.ReadUInt(message.BatchBits) + 1
+        if count > message.BatchMaximum then error("batch count exceeds schema", 0) end
+
+        local minimum = message.BatchBits + message.RecordMinBits * count
+        local maximum = message.BatchBits + message.RecordMaxBits * count
+        if length < minimum or length > maximum then error("batch size does not match schema", 0) end
+    end
+
+    local fixedLength = message.RecordFixedSize
+        and length == (message.BatchBits or 0) + message.RecordMaxBits * count
+    local records = {}
+    for index = 1, count do records[index] = decodeRecord(message, fixedLength) end
+
+    if not fixedLength and net.BytesLeft then
         local _, bits = net.BytesLeft()
         if bits and bits > 0 then error("packet contains trailing data", 0) end
     end
 
-    return values
+    return records
 end
 
 local function receiveMessage(message, length, sender)
@@ -1018,29 +1236,32 @@ local function receiveMessage(message, length, sender)
         end
     end
 
-    if length > message.MaxBits then
+    if length < message.MinBits or length > message.MaxBits then
         recordDrop(message, "malformed")
-        debugDrop(message, "payload exceeds schema")
+        debugDrop(message, "payload size does not match schema")
         return
     end
 
-    local ok, values = pcall(decodeMessage, message)
+    local ok, records = pcall(decodeMessage, message, length)
     if not ok then
         recordDrop(message, "malformed")
-        debugDrop(message, tostring(values))
+        debugDrop(message, tostring(records))
         return
     end
 
     if SERVER and message.Direction == TO_SERVER and profileEnabled() then
-        recordMessage(message, length + 24, 1, values)
+        recordPacket(message, length + 24, 1, records)
     end
 
     if not message.Handler then return end
 
-    if message.Direction == TO_SERVER then
-        message.Handler(sender, unpackValues(values, 1, values.n))
-    else
-        message.Handler(unpackValues(values, 1, values.n))
+    for index = 1, #records do
+        local values = records[index]
+        if message.Direction == TO_SERVER then
+            message.Handler(sender, unpackValues(values, 1, values.n))
+        else
+            message.Handler(unpackValues(values, 1, values.n))
+        end
     end
 end
 
@@ -1059,18 +1280,51 @@ local function defineMessage(direction, name, schema, options)
         fail("message names must be 1 to 64 lowercase namespaced characters", 3)
     end
 
-    local schemaSignature, maximumBits = validateSchema(schema)
-    local unreliable, rate, burst = validateOptions(direction, options)
-    local signature = messageSignature(direction, schemaSignature, unreliable, rate, burst)
+    local compiled = compileSchema(name, schema)
+    local unreliable, rate, burst, batchMaximum = validateOptions(direction, options)
+    local batchBits = batchMaximum and bitsForUnsigned(batchMaximum - 1) or nil
+    local minimumBits = compiled.minimumBits + (batchBits or 0)
+    local maximumBits = compiled.maximumBits
+    if batchMaximum then maximumBits = maximumBits * batchMaximum + batchBits end
+    if maximumBits > MAX_PAYLOAD_BITS then
+        fail("batched message schema can exceed the 60 KiB safety limit", 3)
+    end
+
+    local signature = messageSignature(
+        direction,
+        compiled.signature,
+        unreliable,
+        rate,
+        burst,
+        batchMaximum
+    )
     local existing = Net._Messages[name]
+
+    local function applyCompiled(message)
+        message.Schema = schema
+        message.FieldCount = compiled.count
+        message.Validators = compiled.validators
+        message.Writers = compiled.writers
+        message.Readers = compiled.readers
+        message.ReadValidators = compiled.readValidators
+        message.FieldLabels = compiled.labels
+        message.RecordMinBits = compiled.minimumBits
+        message.RecordMaxBits = compiled.maximumBits
+        message.RecordFixedSize = compiled.fixedSize
+        message.MinBits = minimumBits
+        message.MaxBits = maximumBits
+        message.BatchMaximum = batchMaximum
+        message.BatchBits = batchBits
+        message.PendingBatches = {}
+        Net._PendingBatchMessages[message] = nil
+    end
 
     if existing then
         if existing.Signature ~= signature then
             fail("message " .. name .. " was already defined with a different contract", 3)
         end
 
-        existing.Schema = schema
-        existing.MaxBits = maximumBits
+        applyCompiled(existing)
         setmetatable(existing, Message)
         installReceiver(existing)
         return existing
@@ -1079,14 +1333,14 @@ local function defineMessage(direction, name, schema, options)
     local message = setmetatable({
         Name = name,
         Direction = direction,
-        Schema = schema,
         Signature = signature,
-        MaxBits = maximumBits,
         Unreliable = unreliable,
         Rate = rate,
         Burst = burst,
         RateStates = setmetatable({}, {__mode = "k"}),
     }, Message)
+
+    applyCompiled(message)
 
     Net._Messages[name] = message
 

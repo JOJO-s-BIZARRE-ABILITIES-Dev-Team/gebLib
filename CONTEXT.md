@@ -28,8 +28,11 @@ A named, directional packet with one shared ordered schema and one receiving cal
 **Network Codec**:
 A bounded rule that validates, writes, reads, and measures one Network Message field.
 
+**Network Batch**:
+An opt-in group of queued records for one server-to-client Network Message and recipient.
+
 **Network Profile**:
-Opt-in observations about message size, frequency, recipients, repeated payloads, and field ranges used to advise developers about possible optimizations.
+Opt-in observations about packet and record size, frequency, recipients, repeated payloads, and field ranges used to advise developers about possible optimizations.
 
 ## Relationships
 
@@ -39,6 +42,7 @@ Opt-in observations about message size, frequency, recipients, repeated payloads
 - A **Transient Visual** exists only on the client that creates it.
 - A **Network Message** is either server-to-client or client-to-server.
 - A **Network Message** owns an ordered list of **Network Codecs**.
+- A **Network Batch** belongs to one batch-enabled Network Message and preserves record order.
 - A **Network Profile** observes traffic without changing a Network Message schema.
 
 ## Example dialogue

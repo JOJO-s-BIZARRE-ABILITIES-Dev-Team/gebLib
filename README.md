@@ -109,6 +109,25 @@ Messages use their own native pooled names and contain no route strings, field n
 
 Use `unreliable = true` only when losing a packet is acceptable. Persistent entity state still belongs in `NetworkVar`, NW2 where appropriate, or a feature-owned snapshot protocol.
 
+High-frequency server messages can opt into batching:
+
+```lua
+local Positions = gebLib.Net.ToClient("myaddon.positions", {
+    gebLib.Net.Entity,
+    gebLib.Net.Vector,
+}, {
+    unreliable = true,
+    batch = 32,
+})
+
+Positions:Queue(player, entity, position)
+Positions:QueueBroadcast(entity, position)
+```
+
+Queued records are grouped by message and recipient, then flushed once per server tick. Reaching the configured batch limit flushes that group immediately. The receiver callback still runs once per record in order. `Send` and `Broadcast` remain immediate and flush older queued records first.
+
+Batching adds up to one tick of latency and a small count field. Use it only for bursts of small records. The maximum batch size is part of the wire contract, so both realms must define the same value.
+
 ### Network profiler
 
 Enable profiling in a development session:
@@ -124,7 +143,7 @@ geblib_net_profile_report
 geblib_net_profile_reset
 ```
 
-The server records message rate, encoded bits, recipient fan-out, repeated payloads, malformed packets, rate-limit drops, and observed field ranges. After at least 256 samples and 30 seconds, it can suggest smaller integer widths, bounded strings or arrays, `Normal` instead of `Vector`, `Player` instead of `Entity`, or an integer codec instead of `Float`.
+The server records packet and record rates, encoded bits, recipient fan-out, repeated payloads, malformed packets, rate-limit drops, and observed field ranges. It can identify high-rate small packets that may benefit from batching and repeated unchanged state that should not be sent. After at least 256 field samples and 30 seconds, it can also suggest smaller integer widths, bounded strings or arrays, `Normal` instead of `Vector`, `Player` instead of `Entity`, or an integer codec instead of `Float`.
 
 Profiler advice is based on observed traffic, not a proof of the domain limits. Confirm rare and future values before changing a released schema. Profiling is disabled by default, does not replace the global `net` functions, and never modifies a schema automatically.
 
@@ -312,3 +331,5 @@ lua tests/action_test.lua
 ```
 
 All shipped Lua files use Lua 5.1-compatible syntax. They are checked with LuaJIT and `luac -p`.
+
+Run the optional local CPU benchmark with `lua tests/net_benchmark.lua` or `luajit tests/net_benchmark.lua`. It compares schema sends against equivalent direct `net` calls in a Lua mock. It is useful for tracking wrapper overhead, but only an in-game benchmark can measure Source networking and real addon traffic.

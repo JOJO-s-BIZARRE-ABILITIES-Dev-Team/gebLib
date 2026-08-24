@@ -1,5 +1,6 @@
 local now = 0
 local profileEnabled = false
+local profileReadCount = 0
 local commandCallbacks = {}
 
 local function assertEqual(actual, expected, message)
@@ -64,7 +65,10 @@ FCVAR_ARCHIVE = 1
 
 function GetConVar() return nil end
 function CreateConVar()
-    return {GetBool = function() return profileEnabled end}
+    return {GetBool = function()
+        profileReadCount = profileReadCount + 1
+        return profileEnabled
+    end}
 end
 
 concommand = {}
@@ -80,6 +84,7 @@ local function newNet()
         reading = nil,
         readIndex = 1,
         bitsLeft = 0,
+        bytesLeftCalls = 0,
     }
 
     local mock = {}
@@ -117,6 +122,7 @@ local function newNet()
     end
 
     function mock.BytesLeft()
+        state.bytesLeftCalls = state.bytesLeftCalls + 1
         if not state.reading then return nil end
         return math.ceil(state.bitsLeft / 8), state.bitsLeft
     end
@@ -276,6 +282,9 @@ do
     local invalid = pcall(function() message:Broadcast(4096) end)
     local duplicate = pcall(function() Net.ToClient("test.validation", {Net.UInt(11)}) end)
     local missingRate = pcall(function() Net.ToServer("test.no_rate", {}) end)
+    local clientBatch = pcall(function()
+        Net.ToServer("test.client_batch", {}, {rate = 1, batch = 4})
+    end)
     local invalidName = pcall(function() Net.ToClient("InvalidName", {}) end)
 
     assertEqual(same, message, "identical definitions should be idempotent")
@@ -283,7 +292,21 @@ do
     assertEqual(invalid, false, "UInt overflow should fail before sending")
     assertEqual(duplicate, false, "different duplicate contract should fail")
     assertEqual(missingRate, false, "client messages should require an explicit rate")
+    assertEqual(clientBatch, false, "client-to-server messages should not support batching")
     assertEqual(invalidName, false, "message names should be lowercase and namespaced")
+
+    dofile("lua/geblib/net.lua")
+    local reloaded = gebLib.Net.ToClient("test.validation", {gebLib.Net.UInt(12)})
+    assertEqual(reloaded, message, "unchanged messages should survive a module hot reload")
+end
+
+do
+    profileReadCount = 0
+    local Net = loadRealm(true)
+    local message = Net.ToClient("test.profile_fast_path", {Net.UInt(6)})
+    local readsAfterLoad = profileReadCount
+    for index = 1, 100 do message:Broadcast(index % 64) end
+    assertEqual(profileReadCount, readsAfterLoad, "disabled profiler should not poll its ConVar per packet")
 end
 
 do
@@ -298,6 +321,47 @@ do
     }):Broadcast(players[1], 1, 100, 0, true, 1)
 
     assertEqual(state.sent[1].bits, 92, "typed animation payload should use its exact field widths")
+end
+
+do
+    local serverNet, serverState = loadRealm(true)
+    local batched = serverNet.ToClient("test.batch", {serverNet.UInt(6)}, {batch = 4})
+    batched:QueueBroadcast(1)
+    batched:QueueBroadcast(2)
+    batched:QueueBroadcast(3)
+    assertEqual(#serverState.sent, 0, "queued records should wait for the tick flush")
+    assertEqual(serverNet.FlushBatches(), 1, "one batch should be flushed")
+    assertEqual(#serverState.sent, 1, "queued records should share one packet")
+    assertEqual(serverState.sent[1].bits, 20, "batch packet should contain one count and three records")
+
+    batched:QueueBroadcast(4)
+    batched:Broadcast(5)
+    assertEqual(#serverState.sent, 3, "immediate sends should flush older queued records first")
+
+    local clientNet, clientState = loadRealm(false)
+    local received = {}
+    clientNet.ToClient("test.batch", {clientNet.UInt(6)}, {batch = 4}):Receive(function(value)
+        received[#received + 1] = value
+    end)
+    clientState:Deliver(serverState.sent[1])
+    assertEqual(#received, 3, "batch should invoke the handler once per record")
+    assertEqual(received[3], 3, "batch record order")
+    clientState:Deliver(serverState.sent[2])
+    clientState:Deliver(serverState.sent[3])
+    assertEqual(received[4], 4, "queued record should remain ordered before an immediate send")
+    assertEqual(received[5], 5, "immediate batched message should use a one-record packet")
+
+    local fixedServerNet, fixedServerState = loadRealm(true)
+    fixedServerNet.ToClient("test.fixed_decode", {fixedServerNet.UInt(6), fixedServerNet.Bool}):Broadcast(12, true)
+    local fixedClientNet, fixedClientState = loadRealm(false)
+    local fixedCalls = 0
+    fixedClientNet.ToClient("test.fixed_decode", {fixedClientNet.UInt(6), fixedClientNet.Bool}):Receive(function()
+        fixedCalls = fixedCalls + 1
+    end)
+    fixedClientState:Deliver(fixedServerState.sent[1], nil, fixedServerState.sent[1].bits - 1)
+    fixedClientState:Deliver(fixedServerState.sent[1])
+    assertEqual(fixedCalls, 1, "fixed packets should reject truncated payloads before decoding")
+    assertEqual(fixedClientState.bytesLeftCalls, 0, "fixed packets should decode without per-field bounds queries")
 end
 
 do
@@ -405,6 +469,30 @@ do
     assertContains(joined, "256 packets", "profiler packet count")
     assertContains(joined, "average 100.00", "profiler field average")
     assertContains(joined, "consecutive repeats", "profiler duplicate traffic")
+end
+
+do
+    local Net = loadRealm(true, true)
+    local message = Net.ToClient("test.profile_batching", {})
+    local output = {}
+    local originalPrint = print
+    print = function(...)
+        local parts = {}
+        for index = 1, select("#", ...) do parts[index] = tostring(select(index, ...)) end
+        output[#output + 1] = table.concat(parts, " ")
+    end
+
+    now = 0
+    for index = 1, 128 do
+        now = index * 0.01
+        message:Broadcast()
+    end
+    Net.ReportProfile()
+    print = originalPrint
+
+    local joined = table.concat(output, "\n")
+    assertContains(joined, "consider opt-in batching", "profiler batching advice")
+    assertContains(joined, "avoid sending unchanged state", "profiler repeated-state advice")
 end
 
 print("network: ok")
