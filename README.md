@@ -326,6 +326,18 @@ gebLib.Visuals.RemoveDebris(debris)
 gebLib.Visuals.ClearDebris()
 ```
 
+### Debris profiler
+
+The clientside debris profiler follows the main developer debug switch. It records nothing and installs no frame hook while debug mode is disabled.
+
+```text
+geblib_developer_debugmode 1
+geblib_debris_profile_reset
+geblib_debris_profile_report
+```
+
+The report separates impact construction, placement queries, model and prop creation, physics setup, particles, smoke, active and sleeping physics objects, frame hitches, 1% low FPS, and FPS ranges by active debris count.
+
 `gebLib_ChatAddText` accepts up to 32 string or color arguments. Each string is limited to 1024 bytes.
 
 Entity helpers remain available for living-entity checks, looking direction, nearby collision checks, empty-position searches, bone hitboxes, and dissolving.
