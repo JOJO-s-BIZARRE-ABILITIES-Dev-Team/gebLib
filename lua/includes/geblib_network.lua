@@ -15,7 +15,7 @@ if SERVER then
     util.AddNetworkString("gebLib.cl.core.UpdateByIndex")
 end
 
-//////////////////////////////////////
+--------------------------------------
 local rshift        = bit.rshift
 local max           = math.max
 local abs           = math.abs
@@ -47,7 +47,7 @@ local TableToJSON   = util.TableToJSON
 -- local netReadData       = net.ReadData
 -- local netWriteBit       = net.WriteBit  
 -- local netReadBit        = net.ReadBit
-//////////////////////////////////////
+--------------------------------------
 
 gebLib_net = {}
 
@@ -74,7 +74,7 @@ function gebLib_net.IntToBits(int)
         int = abs(int + 1)
     end
 
-    return max(UIntToBits(int) + 1, 3)
+    return max(gebLib_net.UIntToBits(int) + 1, 3)
 end
 
 local UIntToBits = gebLib_net.UIntToBits
@@ -82,6 +82,10 @@ local IntToBits = gebLib_net.IntToBits
 
 --Substracting 1 from the amount, so that the range is from 0 - 31 instead of 1 - 32, saving one bit
 function gebLib_net.WriteBits(amount)
+    if not isnumber(amount) or amount % 1 ~= 0 or amount < 1 or amount > 32 then
+        error("bit count must be between 1 and 32")
+    end
+
     net.WriteUInt(amount - 1, 5)
 end
 
@@ -94,11 +98,11 @@ local WriteBits = gebLib_net.WriteBits
 local ReadBits = gebLib_net.ReadBits
 
 function gebLib_net.WritePlayer(ply)
-    net.WriteUInt(ply:EntIndex(), UIntToBits(player.GetCount()))
+    net.WriteUInt(ply:EntIndex(), UIntToBits(game.MaxPlayers()))
 end
 
 function gebLib_net.ReadPlayer()
-    local bits = UIntToBits(player.GetCount())
+    local bits = UIntToBits(game.MaxPlayers())
     return Entity(net.ReadUInt(bits))
 end
 
@@ -166,9 +170,9 @@ function gebLib_net.SendToAllExcept(excludePly)
 	local playersToSendTo = {}
 
 	for _, ply in player.Pairs() do
-		if ply == excludePly then continue end
-
-		table.insert(playersToSendTo, ply)
+		if ply ~= excludePly then
+			table.insert(playersToSendTo, ply)
+		end
 	end
 	
 	net.Send(playersToSendTo)
@@ -208,8 +212,19 @@ end
 
 function gebLib_net.UpdateEntityTable(ent, varName, tableToSet)
     local json = TableToJSON(tableToSet)
+    if not json then
+        error("gebLib Networking: Unable to encode table as JSON")
+    end
+
     local compressedData = Compress(json)
+    if not compressedData then
+        error("gebLib Networking: Unable to compress encoded table")
+    end
+
     local bytesAmount = #compressedData
+    if bytesAmount > 65535 then
+        error("gebLib Networking: Compressed table exceeds the 65535 byte limit")
+    end
 
     net.Start("gebLib.cl.core.UpdateTable")
     net.WriteUInt(bytesAmount, 16)
@@ -220,16 +235,16 @@ end
 
 function gebLib_net.UpdateEntityColor(ent, varName, colorToSet)
     net.Start("gebLib.cl.core.UpdateColor")
-    net.WriteColor(colorToSet, false)
+    net.WriteColor(colorToSet)
     WriteEntityAndVar(ent, varName)
     net.Broadcast()
 end
 
 function gebLib_net.UpdateEntityVector(ent, varName, vectorToSet)
-    if gebLib_IsNormalized(vectorToSet) then
-        gebLib_net.UpdateEntityNormalVector()
+    if gebLib_utils.IsNormalized(vectorToSet) then
+        gebLib_net.UpdateEntityNormalVector(ent, varName, vectorToSet)
     else
-        gebLib_net.UpdateEntityVectorSlow()
+        gebLib_net.UpdateEntityVectorSlow(ent, varName, vectorToSet)
     end
 end
 
@@ -262,7 +277,7 @@ function gebLib_net.UpdateEntityBool(ent, varName, boolToSet)
 end
 
 function gebLib_net.UpdateEntityNumber(ent, varName, numberToSet)
-    if numberToSet % 1 != 0 then
+    if numberToSet % 1 ~= 0 or numberToSet > 4294967295 or numberToSet < -2147483648 then
         gebLib_net.UpdateEntityFloat(ent, varName, numberToSet)
     elseif numberToSet > 0 then
         gebLib_net.UpdateEntityUInt(ent, varName, numberToSet)
@@ -298,8 +313,8 @@ end
 
 function gebLib_net.UpdateEntityFloat(ent, varName, numberToSet)
     net.Start("gebLib.cl.core.UpdateFloat")
-    WriteEntityAndVar(ent, varName)
     net.WriteFloat(numberToSet)
+    WriteEntityAndVar(ent, varName)
     net.Broadcast()
 end
 
@@ -335,7 +350,11 @@ if CLIENT then
         end
 
         if not ent:IsValid() then
-            error("gebLib Networking: Trying to update variable: " .. varName .. " to value: " .. tostring(value) .. " on ent that is nil, ent might not be loaded or does not exist on the client!")
+            error("gebLib Networking: Trying to update variable: " .. tostring(varName) .. " to value: " .. tostring(value) .. " on ent that is nil, ent might not be loaded or does not exist on the client!")
+        end
+
+        if varName == nil then
+            error("gebLib Networking: Received an unknown indexed variable")
         end
 
         ent[varName] = value
@@ -384,13 +403,18 @@ if CLIENT then
     end)
 
     net.Receive("gebLib.cl.core.UpdateColor", function(len)
-        local value = net.ReadColor(false)
+        local value = net.ReadColor()
         SetEntityValue(value, len)
     end)
 
     net.Receive("gebLib.cl.core.UpdateTable", function(len)
         local bytesAmount = net.ReadUInt(16)
-        local value = JSONToTable(Decompress(net.ReadData(bytesAmount)))
+        local json = Decompress(net.ReadData(bytesAmount))
+        if not json then return end
+
+        local value = JSONToTable(json)
+        if value == nil then return end
+
         SetEntityValue(value, len)
     end)
 end

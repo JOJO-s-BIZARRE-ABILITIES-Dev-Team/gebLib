@@ -59,7 +59,7 @@ end
 /////////////////////////
 --------------------------
 function MWEP:gebLib_IsCarried()
-	return self:GetOwner():IsValid()
+	return IsValid(self:GetOwner())
 end
 --------------------------
 /////////////////////////
@@ -71,14 +71,20 @@ function MPLY:gebLib_ChatAddText( ... )
     if CLIENT then 
         for k, v in ipairs( args ) do
             if isstring(v) then
-                args[ k ] = language.GetPhrase( v )   
+                args[ k ] = language.GetPhrase( v )
+            elseif istable(v) and isnumber(v.r) and isnumber(v.g) and isnumber(v.b) then
+                args[ k ] = Color(v.r, v.g, v.b, v.a or 255)
             end
         end
 
         chat.AddText( unpack( args ) )
     else
         local json = TableToJSON( args )
+        if not json then return end
+
         local data = Compress( json )
+        if not data or #data > 65535 then return end
+
         local bytes = #data
 
         netStart( "gebLib.cl.utils.ChatAddText" )
@@ -94,11 +100,16 @@ if CLIENT then
         local data = netReadData(bytes)
 
         local json = Decompress(data)
+        if not json then return end
+
         local args = JSONToTable(json)
+        if not istable(args) then return end
 
         for k, v in ipairs( args ) do
             if isstring(v) then
-                args[ k ] = language.GetPhrase( v )   
+                args[ k ] = language.GetPhrase( v )
+            elseif istable(v) and isnumber(v.r) and isnumber(v.g) and isnumber(v.b) then
+                args[ k ] = Color(v.r, v.g, v.b, v.a or 255)
             end
         end
 
@@ -120,7 +131,7 @@ function MPLY:gebLib_PlaySequence( slot, sequence, cycle, autokill )
 	if not self:gebLib_PredictedOrDifferentPlayer() then return end
 
     cycle = cycle or 0
-    autokill = autokill or true
+    if autokill == nil then autokill = true end
     if isstring( sequence ) then
         sequence = self:LookupSequence( sequence )
     end
@@ -151,9 +162,9 @@ function MPLY:gebLib_PlayAction(sequence, playback)
     self:SetLayerPlaybackRate(1, playback)
 
     if SERVER then
-        net.Start("gebLib.cl.utils.PlayAnim.Action")
+            net.Start("gebLib.cl.utils.PlayAnim.Action")
 			net.WritePlayer(self)
-            net.WriteUInt(sequence, 10)
+            net.WriteUInt(sequence, 16)
             net.WriteFloat(playback)
 		if game.SinglePlayer() then
 			net.Broadcast()
@@ -266,7 +277,7 @@ if CLIENT then
         local ply = net.ReadPlayer()
         
         local slot = netReadUInt( 3 )
-        local anim = netReadUInt( 10 )
+        local anim = netReadUInt( 16 )
         local cycle = netReadFloat()
         local autokill = netReadBool()
         
@@ -278,7 +289,7 @@ if CLIENT then
     netReceive("gebLib.cl.utils.PlayAnim.Action", function() 
         local ply = net.ReadPlayer()
         
-        local anim = netReadUInt(10)
+        local anim = netReadUInt(16)
         local playback = netReadFloat()
 
 	    if !IsValid( ply ) then return end
@@ -418,13 +429,13 @@ function MENT:gebLib_IsLookingAt(vec, minDiff)
 	end
 
     local diff = vec - self:GetPos()
-	return lookVector:Dot(diff) / diff:Length() >= minDiff
+	local distance = diff:Length()
+	if distance == 0 then return true end
+	return lookVector:Dot(diff) / distance >= minDiff
 end
 /////////////////////////
 function MENT:gebLib_CheckSides( mult, filterEnts )
 	mult = mult or 1
-	local stand = NULL
-
 	local pos = self:GetPos()
     //
     local toFilter = {}
@@ -481,11 +492,11 @@ local maxs = Vector(18, 18, 73)
 /////////////////////////
 function MENT:gebLib_PositionEmpty(pos, filter)
 	filter = filter or self
-    return not TraceHull({start = pos, endpos = pos, mins = mins, maxs = maxs, filter = filter}, self).Hit
+    return not TraceHull({start = pos, endpos = pos, mins = mins, maxs = maxs, filter = filter}).Hit
 end
 /////////////////////////
 function MENT:gebLib_FindEmptyPosition(pos, distance, step, filter )
-    if self:gebLib_PositionEmpty(pos) then
+    if self:gebLib_PositionEmpty(pos, filter) then
         return pos
     end
     for j = step, distance, step do
@@ -598,7 +609,7 @@ function gebLib_utils.TableEquals(tbl1, tbl2)
 				return false
 			elseif value1 ~= value2 then
 				if type(value1) == "table" and type(value2) == "table" then
-					if not table.Equals(value1, value2) then
+					if not gebLib_utils.TableEquals(value1, value2) then
 						return false
 					end
 				else
@@ -644,13 +655,14 @@ function gebLib_utils.CreateDebris( modelPath, isProp, lifeTime )
     else
         debris = ClientsideModel( modelPath )
     end
+	if not IsValid(debris) then return NULL end
 
     local index = table.insert( gebLib__DebrisList, debris )
     local finalLifeTime = lifeTime or 10
 
     debris.TableIndex   = index
     debris.LifeTime     = CurTime() + finalLifeTime
-    debris.DoAnimation  = debris.DoAnimation or true
+    debris.DoAnimation  = true
 
     local hookNameThink = "gebLib.Debris.Think."  .. tostring( index )
 
@@ -659,6 +671,7 @@ function gebLib_utils.CreateDebris( modelPath, isProp, lifeTime )
 
         if CurTime() > debris.LifeTime then
             gebLib_utils.RemoveDebris( debris )
+			return
         end
 
         if debris.DoAnimation and debris:GetModelScale() then
@@ -666,8 +679,13 @@ function gebLib_utils.CreateDebris( modelPath, isProp, lifeTime )
                 debris.DesiredModelScale = debris:GetModelScale()
                 debris:SetModelScale( 0, 0 )
             end
-            
-            debris:SetModelScale( Lerp( math.ease.InOutSine( FrameTime() * 24 ), debris:GetModelScale(), debris.DesiredModelScale ) )
+
+            local scale = Lerp(math.ease.InOutSine(math.Clamp(FrameTime() * 24, 0, 1)), debris:GetModelScale(), debris.DesiredModelScale)
+            if math.abs(scale - debris.DesiredModelScale) < 0.001 then
+                scale = debris.DesiredModelScale
+                debris.DoAnimation = false
+            end
+            debris:SetModelScale(scale)
         end
     end)
 
@@ -676,7 +694,7 @@ function gebLib_utils.CreateDebris( modelPath, isProp, lifeTime )
 
         local blend = 1
         if CurTime() > self.LifeTime - 1 then
-            blend = Lerp( math.abs( self.LifeTime - CurTime() - 1 ) / 1, 1, 0 )
+            blend = Lerp(math.Clamp(math.abs(self.LifeTime - CurTime() - 1), 0, 1), 1, 0)
         end
         render.SetBlend( blend )
         self:DrawModel()
@@ -687,6 +705,8 @@ function gebLib_utils.CreateDebris( modelPath, isProp, lifeTime )
 end
 
 function gebLib_utils.RemoveDebris( debris )
+	if not IsValid(debris) then return end
+
     gebLib__DebrisList[ debris.TableIndex ] = nil
 
     debris:Remove()
@@ -734,15 +754,22 @@ local formattedNums = {
 function gebLib_utils.SortNumbers( num, min, rounding )
     local str = ""
 
+	min = min or 1000
     if !rounding then rounding = 0 end
 
-    if isstring( num ) then num = tonumber(num) end
+    if isstring( num ) then
+        local numeric = tonumber(num)
+        if not numeric then return num end
+        num = numeric
+    end
+    if not isnumber(num) then return num end
+
     for i = 1, #formattedNums do
         if num >= formattedNums[i][1] then
             str = ( math.Round( num / formattedNums[i][1], rounding ) ) .. formattedNums[i][2]
         end
     end
-    return (num < min and num or str)
+    return (num < min or str == "") and num or str
 end
 
 /////////////////////////

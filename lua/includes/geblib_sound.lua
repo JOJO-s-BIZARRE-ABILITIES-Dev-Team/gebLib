@@ -220,13 +220,18 @@ function gebLib_SoundDuration(soundPath)
 	end
 	
 	local extension = soundPath:GetExtensionFromFilename()
+	extension = extension and string.lower(extension)
 	
 	if extension and soundDecoders[extension] then
 		local buffer = file.Open(soundPath, "r", "GAME")
-		local result = soundDecoders[extension](buffer)
-		soundCache[soundPath] = result
+		if not buffer then return SoundDuration(soundPath) end
+
+		local ok, result = pcall(soundDecoders[extension], buffer)
 		buffer:Close()
-		return result
+		if ok and isnumber(result) and result >= 0 then
+			soundCache[soundPath] = result
+			return result
+		end
 	end
 
 	return SoundDuration(soundPath)

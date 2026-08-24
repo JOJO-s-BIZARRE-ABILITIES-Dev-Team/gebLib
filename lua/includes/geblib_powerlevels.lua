@@ -44,6 +44,7 @@ if CLIENT then
     netReceive("gebLib.cl.powerlevel.SetPowerLevel", function()
         local entity = netReadEntity()
         local powerLevel = netReadFloat()
+		if not IsValid(entity) then return end
 
         powerLevel = math.Clamp( powerLevel, 0, math.huge )
 
