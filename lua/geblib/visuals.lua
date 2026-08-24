@@ -6,6 +6,8 @@ local GROW_TIME = 0.25
 local DEFAULT_DEBRIS_GRAVITY = Vector(0, 0, -600)
 local MAX_IMPACT_MODELS = 16
 local MAX_IMPACT_PROPS = 12
+local IMPACT_HULL_MINS = Vector(-15, -15, -15)
+local IMPACT_HULL_MAXS = Vector(15, 15, 15)
 
 local ROCK_DEBRIS_MODELS = {
     "models/props_debris/physics_debris_rock1.mdl",
@@ -43,6 +45,18 @@ local impactTrace = {}
 local impactTraceData = {
     mask = MASK_VISIBLE,
     output = impactTrace,
+}
+local impactHull = {}
+local impactHullData = {
+    mask = MASK_SOLID,
+    mins = IMPACT_HULL_MINS,
+    maxs = IMPACT_HULL_MAXS,
+    output = impactHull,
+}
+local impactModelTrace = {}
+local impactModelTraceData = {
+    mask = MASK_VISIBLE,
+    output = impactModelTrace,
 }
 
 Visuals.RockDebrisModels = ROCK_DEBRIS_MODELS
@@ -268,7 +282,7 @@ function Visuals.CreateDebrisBurst(materialPath, position, count, options)
     return emitted
 end
 
-function Visuals.CreateDebris(modelPath, clientProp, lifetime)
+function Visuals.CreateDebris(modelPath, clientProp, lifetime, ignoreLimit)
     local limit = math.max(math.floor(tonumber(Visuals.MaxDebris) or 512), 0)
     if limit == 0 then return NULL end
 
@@ -281,7 +295,7 @@ function Visuals.CreateDebris(modelPath, clientProp, lifetime)
 
     if not IsValid(entity) then return NULL end
 
-    while #debrisHeap >= limit do Visuals.RemoveDebris(debrisHeap[1]) end
+    while not ignoreLimit and #debrisHeap >= limit do Visuals.RemoveDebris(debrisHeap[1]) end
 
     if not isnumber(lifetime) then lifetime = 10 end
     lifetime = math.max(lifetime, 0)
@@ -399,13 +413,16 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
     if materialType == MAT_FLESH or materialType == MAT_EGGSHELL then return 0 end
 
     local count = math.max(math.floor(tonumber(options.count) or strength * 0.5), 0)
-    if count == 0 then return 0 end
-
     local modelLimit = math.max(math.floor(tonumber(options.modelLimit) or MAX_IMPACT_MODELS), 0)
     local propLimit = math.max(math.floor(tonumber(options.propLimit) or MAX_IMPACT_PROPS), 0)
-    local modelCount = options.craters == false and 0 or math.min(count, modelLimit, math.max(math.floor(math.sqrt(count) * 1.5), 1))
-    local propCount = options.props == false and 0 or math.min(count - modelCount, propLimit, math.max(math.floor(math.sqrt(count)), 1))
-    local particleCount = options.particles == false and 0 or math.max(count - modelCount - propCount, 0)
+    local requestedModels = tonumber(options.modelCount)
+    local requestedProps = tonumber(options.propCount)
+    local requestedParticles = tonumber(options.particleCount)
+    local modelCount = options.craters == false and 0 or math.max(math.floor(requestedModels or math.min(count, modelLimit, math.max(math.floor(math.sqrt(count) * 1.5), 1))), 0)
+    local propCount = options.props == false and 0 or math.max(math.floor(requestedProps or math.min(count - modelCount, propLimit, math.max(math.floor(math.sqrt(count)), 1))), 0)
+    local particleCount = options.particles == false and 0 or math.max(math.floor(requestedParticles or count - modelCount - propCount), 0)
+    if modelCount == 0 and propCount == 0 and particleCount == 0 and options.smoke == false then return 0 end
+
     local models = impactModels(materialType)
     local modelScale = math.max(tonumber(options.modelScale) or 1, 0.01)
     local staticLifetime = math.max(tonumber(options.lifetime) or 5, 0)
@@ -416,42 +433,93 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
         surfaceMaterial = surfaceMaterialAt(position, normal, options.hitTexture)
     end
 
-    local basis = normal:Angle()
-    local right = basis:Right()
-    local up = basis:Up()
-    local spreadRadius = math.max(tonumber(options.radius) or strength * 0.25, 1)
-    local baseScale = math.Clamp(strength * 0.01, 0.35, 3) * modelScale
+    local sourceDirection = options.direction or vector_origin
+    local impactDirection = normal * 2 + sourceDirection * 1.3
+    local particleDirection = impactDirection
+    if particleDirection:LengthSqr() == 0 then particleDirection = normal end
+    particleDirection = particleDirection:GetNormalized()
+    local normalAngle = normal:Angle()
+    local loopCount = math.max(modelCount, propCount)
+    local pathDivisor = math.max(tonumber(options.pathDivisor) or math.min(loopCount, strength), 1)
+    local spreadRadius = math.max(tonumber(options.radius) or strength / 3, 1)
+    local propSpeed = math.max(tonumber(options.propSpeed) or 1000, 0)
+    local propVelocity = options.propVelocity or vector_origin
+    local propScale = tonumber(options.propScale)
+    local validatePlacement = options.validatePlacement ~= false
+    local preserveCount = options.preserveCount == true
+    local physicsMaterial = impactPhysicsMaterial(materialType)
     local spawned = 0
 
-    for index = 1, modelCount do
-        local distance = math.sqrt(math.Rand(0, 1)) * spreadRadius
-        local rotation = math.Rand(0, math.pi * 2)
-        local modelPosition = position + right * (math.cos(rotation) * distance) + up * (math.sin(rotation) * distance) - normal * math.Rand(0, 2)
-        local modelAngles = normal:Angle()
-        modelAngles:RotateAroundAxis(normal, math.Rand(0, 360))
-        local entity = Visuals.CreateDebris(models[math.random(1, #models)], false, staticLifetime)
-        if IsValid(entity) then
-            configureImpactModel(entity, modelPosition, modelAngles, baseScale * math.Rand(0.6, 1.35), surfaceMaterial, shadows)
-            spawned = spawned + 1
-        end
-    end
+    for index = 1, loopCount do
+        local currentPosition = position + impactDirection * (index / pathDivisor)
 
-    local direction = options.direction or normal
-    if direction:LengthSqr() == 0 then direction = normal end
-    direction = (normal * 2 + direction:GetNormalized()):GetNormalized()
-    local physicsMaterial = impactPhysicsMaterial(materialType)
+        local randomDirection = VectorRand()
+        randomDirection.x = randomDirection.x / 55
+        randomDirection:Rotate(normalAngle)
+        randomDirection:Normalize()
 
-    for index = 1, propCount do
-        local entity = Visuals.CreateDebris(models[math.random(1, #models)], true, propLifetime)
-        if IsValid(entity) then
-            configureImpactModel(entity, position + normal * 12, AngleRand(), nil, surfaceMaterial, shadows)
-            entity:SetCollisionGroup(COLLISION_GROUP_DEBRIS)
-            local physics = entity:GetPhysicsObject()
-            if IsValid(physics) then
-                physics:SetVelocity(direction * math.Rand(250, 550) + VectorRand() * math.Rand(150, 450))
-                physics:SetMaterial(physicsMaterial)
+        if index <= modelCount then
+            local idealPosition = currentPosition + randomDirection * spreadRadius * math.Rand(0.1, 1)
+            impactHullData.start = idealPosition
+            impactHullData.endpos = idealPosition
+            if validatePlacement then util.TraceHull(impactHullData) end
+
+            if not validatePlacement or impactHull.Hit then
+                if options.flags == 2 then currentPosition = position end
+                local faceDirection = (idealPosition - (currentPosition - normal * 15)):GetNormalized()
+                local modelPosition = currentPosition - normal + randomDirection * (strength * 0.25) * math.Rand(0.5, 2)
+                local entity = Visuals.CreateDebris(models[math.random(1, #models)], false, staticLifetime, preserveCount)
+
+                if IsValid(entity) then
+                    configureImpactModel(entity, modelPosition, faceDirection:Angle(), math.Rand(3, strength / 100) * modelScale, surfaceMaterial, shadows)
+                    entity:Spawn()
+                    entity:Activate()
+
+                    local keep = true
+                    if validatePlacement then
+                        impactModelTraceData.start = modelPosition + normal * 15
+                        impactModelTraceData.endpos = modelPosition - normal * 15
+                        util.TraceLine(impactModelTraceData)
+                        keep = impactModelTrace.Hit
+
+                        for check = 1, 3 do
+                            if not keep then break end
+                            if bit.band(util.PointContents(entity:GetPos() - normal), CONTENTS_SOLID) == CONTENTS_SOLID then
+                                entity:SetPos(entity:GetPos() + normal)
+                                if check == 3 then keep = false end
+                            else
+                                break
+                            end
+                        end
+                    end
+
+                    if keep then
+                        spawned = spawned + 1
+                    else
+                        Visuals.RemoveDebris(entity)
+                    end
+                end
             end
-            spawned = spawned + 1
+        end
+
+        if index <= propCount then
+            local propPosition = options.propAtOrigin and position or currentPosition
+            local propAngle = (propPosition - normal * 70 + sourceDirection):GetNormalized():Angle()
+            local entity = Visuals.CreateDebris(models[math.random(1, #models)], true, propLifetime, preserveCount)
+
+            if IsValid(entity) then
+                configureImpactModel(entity, propPosition + normal * 24, propAngle, propScale, surfaceMaterial, shadows)
+                entity:SetCollisionGroup(3)
+                entity:Spawn()
+                entity:Activate()
+
+                local physics = entity:GetPhysicsObject()
+                if IsValid(physics) then
+                    physics:SetVelocity(propVelocity + VectorRand() * propSpeed)
+                    physics:SetMaterial(physicsMaterial)
+                end
+                spawned = spawned + 1
+            end
         end
     end
 
@@ -463,7 +531,7 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
             size = math.Clamp(strength * 0.02, 2, 6),
             endSize = 0,
             speed = math.Clamp(strength * 1.5, 180, 650),
-            direction = direction,
+            direction = particleDirection,
             spread = 0.75,
             gravity = DEFAULT_DEBRIS_GRAVITY,
             collide = false,
@@ -472,21 +540,23 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
         })
     end
 
+    local smokeEffect
     if options.smoke ~= false then
-        local smokePosition = position + normal * 20
+        local smokePosition = position + vector_up * 10 + normal * 50
         local smoke = CreateParticleSystemNoEntity("geblib_debris_smoke", smokePosition)
         if smoke then
-            local smokeCount = math.Clamp(tonumber(options.smokeCount) or count * 0.5, 1, 256) * 0.01
+            smokeEffect = smoke
+            local smokeCount = math.Clamp(tonumber(options.smokeCount) or count * 0.5, 1, 1000) * 0.01
             local color = options.smokeColor or impactColor(materialType)
-            smoke:SetControlPoint(1, direction)
+            smoke:SetControlPoint(1, impactDirection)
             smoke:SetControlPoint(2, Vector(smokeCount, smokeCount, smokeCount))
             smoke:SetControlPoint(3, Vector(color.r / 255, color.g / 255, color.b / 255))
-            smoke:SetControlPoint(4, smokePosition + VectorRand() * 35)
-            smoke:SetControlPoint(5, smokePosition + direction * math.min(strength, 300) + VectorRand() * 35)
+            smoke:SetControlPoint(4, smokePosition + VectorRand() * 50)
+            smoke:SetControlPoint(5, smokePosition + impactDirection + VectorRand() * 50)
         end
     end
 
-    return spawned
+    return spawned, smokeEffect
 end
 
 function Visuals.RemoveDebris(entity)
