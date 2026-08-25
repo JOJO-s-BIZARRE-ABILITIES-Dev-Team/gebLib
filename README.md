@@ -151,24 +151,6 @@ Profiler advice is based on observed traffic, not a proof of the domain limits. 
 
 Network Codecs and compiled Network Message schemas are owned and immutable after definition. Changing the caller's schema table later cannot change the wire contract.
 
-### In-game network self-test
-
-Enable development mode before entering a single-player or listen-server game:
-
-```text
-geblib_developer_debugmode 1
-```
-
-The network self-test starts automatically after the local player is fully connected. It round-trips every codec, both directions, targeted sends, broadcasts, automatic and explicit batch flushing, malformed-packet rejection, and per-player rate limiting. The client and server consoles print one `PASS` or `FAIL` result.
-
-Run it again without reconnecting:
-
-```text
-geblib_net_selftest
-```
-
-The test does nothing while development mode is disabled. Only the single-player client or listen-server host can start it.
-
 ## Status effects
 
 Register a definition once:

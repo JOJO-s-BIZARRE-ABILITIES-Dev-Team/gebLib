@@ -38,8 +38,6 @@ function Entity:gebLib_Alive()
     return self:Health() > 0
 end
 
--- Helpers below hide reusable Garry's Mod behavior rather than renaming one call.
-
 function Entity:gebLib_IsLookingAt(position, minimumDot)
     minimumDot = minimumDot or 0.9
 

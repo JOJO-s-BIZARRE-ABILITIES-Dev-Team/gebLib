@@ -495,28 +495,4 @@ do
     assertContains(joined, "avoid sending unchanged state", "profiler repeated-state advice")
 end
 
-do
-    local addedHooks = {}
-    hook = {Add = function(eventName, hookName, callback)
-        addedHooks[eventName] = {name = hookName, callback = callback}
-    end}
-    timer = {
-        Create = function() end,
-        Remove = function() end,
-        Simple = function() end,
-    }
-    game = {SinglePlayer = function() return true end}
-
-    local serverNet = loadRealm(true)
-    dofile("lua/geblib/net_selftest.lua")
-    assertEqual(serverNet._Messages["geblib.selftest.payload"].FieldCount, 20, "self-test codec contract")
-    assertEqual(serverNet._Messages["geblib.selftest.batch"].BatchMaximum, 4, "self-test batch contract")
-    assertEqual(serverNet._Messages["geblib.selftest.rate"].Burst, 2, "self-test rate contract")
-
-    loadRealm(false)
-    dofile("lua/geblib/net_selftest.lua")
-    assert(commandCallbacks.geblib_net_selftest, "client self-test command should be installed")
-    assertEqual(addedHooks["gebLib.PlayerFullyConnected"].name, "gebLib.Net.SelfTest", "automatic self-test hook")
-end
-
 print("network: ok")

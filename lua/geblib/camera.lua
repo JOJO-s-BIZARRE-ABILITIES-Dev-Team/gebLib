@@ -6,15 +6,10 @@ gebLib._NextCameraId = gebLib._NextCameraId or 0
 
 local Runtime = gebLib._Runtime
 if not Runtime then
-	local loader = include or function(path) return assert(loadfile("lua/" .. path))() end
-	Runtime = loader("geblib/runtime.lua")
+    local loader = include or function(path) return assert(loadfile("lua/" .. path))() end
+    Runtime = loader("geblib/runtime.lua")
 end
 
---------------------
---Contributors: T0M
---------------------
-
---Helper functions
 local function RenderOverride(self)
 	self:DrawModel()
 	self:FrameAdvance()
@@ -61,31 +56,30 @@ local function runCameraEvents(camera, ply, pos, angles, fov, view)
 end
 
 local function stepCamera(camera)
-	if not camera.Playing then return false end
-	if not camera:IsValid() then
-		camera:Stop()
-		return false
-	end
+    if not camera.Playing then return false end
+    if not camera:IsValid() then
+        camera:Stop()
+        return false
+    end
 
-	updateCameraFrame(camera)
-	maintainCameraPresentation(camera)
+    updateCameraFrame(camera)
+    maintainCameraPresentation(camera)
 
-	if CLIENT and not camera.Simulated then return true end
-	if not camera:RunThink() or not camera.Playing then return false end
+    if CLIENT and not camera.Simulated then return true end
+    if not camera:RunThink() or not camera.Playing then return false end
 
-	if CLIENT and not runCameraEvents(camera, camera.Player, vector_origin, angle_zero, 70) then
-		return false
-	end
+    if CLIENT and not runCameraEvents(camera, camera.Player, vector_origin, angle_zero, 70) then
+        return false
+    end
 
-	if camera.CurFrame >= camera.MaxFrames then
-		camera:Stop()
-		return false
-	end
+    if camera.CurFrame >= camera.MaxFrames then
+        camera:Stop()
+        return false
+    end
 
-	return true
+    return true
 end
 
---Constructor
 function Camera.New(name, ply, fps, maxFrames, createFake, useDefaultHooks)
 	if not IsValid(ply) or not ply:IsPlayer() then
 		error("Cannot create a gebLib camera for an invalid player")

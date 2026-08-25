@@ -33,7 +33,6 @@ local sharedFiles = {
     "geblib/chat.lua",
     "geblib/player_animation.lua",
     "geblib/sound.lua",
-    "geblib/net_selftest.lua",
 }
 
 local clientFiles = {
@@ -74,6 +73,7 @@ if CLIENT then
     end
 end
 
+-- TODO: Figure out if gmod implemented a proper player connected hook, it has been like 4 years since this was coded in
 if SERVER then
     local connectedPlayers = {}
 
