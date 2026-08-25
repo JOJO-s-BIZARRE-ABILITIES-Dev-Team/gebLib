@@ -43,6 +43,7 @@ local BATCH_HOOK_NAME = "gebLib.Visuals.DebrisBatches"
 local PROMOTION_HOOK_NAME = "gebLib.Visuals.DebrisPromotions"
 local MAX_BATCH_VERTICES = 60000
 local MAX_PROMOTION_PIECES_PER_FRAME = 16
+local BATCH_TRIANGLE_ORDER = {0, 2, 1}
 local BATCH_LIGHTING_INTERVAL = 0.25
 local BATCH_LIGHTING_DIRECTIONS = {
     {BOX_FRONT, Vector(1, 0, 0)},
@@ -250,38 +251,40 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
                     for entryIndex = 1, #chunk.entries do
                         local entry = chunk.entries[entryIndex]
                         local piece = entry.piece
-                        for vertexIndex = entry.firstVertex, entry.lastVertex do
-                            local vertex = entry.triangles[vertexIndex]
-                            position.x = vertex.pos.x * piece.scale
-                            position.y = vertex.pos.y * piece.scale
-                            position.z = vertex.pos.z * piece.scale
-                            position:Rotate(piece.angles)
-                            position:Add(piece.position)
+                        for triangleIndex = entry.firstVertex, entry.lastVertex, 3 do
+                            for corner = 1, 3 do
+                                local vertex = entry.triangles[triangleIndex + BATCH_TRIANGLE_ORDER[corner]]
+                                position.x = vertex.pos.x * piece.scale
+                                position.y = vertex.pos.y * piece.scale
+                                position.z = vertex.pos.z * piece.scale
+                                position:Rotate(piece.angles)
+                                position:Add(piece.position)
 
-                            local sourceNormal = vertex.normal or vector_up
-                            normal.x = sourceNormal.x
-                            normal.y = sourceNormal.y
-                            normal.z = sourceNormal.z
-                            normal:Rotate(piece.angles)
+                                local sourceNormal = vertex.normal or vector_up
+                                normal.x = sourceNormal.x
+                                normal.y = sourceNormal.y
+                                normal.z = sourceNormal.z
+                                normal:Rotate(piece.angles)
 
-                            if not bounds.mins then
-                                bounds.mins = Vector(position.x, position.y, position.z)
-                                bounds.maxs = Vector(position.x, position.y, position.z)
-                            else
-                                bounds.mins.x = math.min(bounds.mins.x, position.x)
-                                bounds.mins.y = math.min(bounds.mins.y, position.y)
-                                bounds.mins.z = math.min(bounds.mins.z, position.z)
-                                bounds.maxs.x = math.max(bounds.maxs.x, position.x)
-                                bounds.maxs.y = math.max(bounds.maxs.y, position.y)
-                                bounds.maxs.z = math.max(bounds.maxs.z, position.z)
+                                if not bounds.mins then
+                                    bounds.mins = Vector(position.x, position.y, position.z)
+                                    bounds.maxs = Vector(position.x, position.y, position.z)
+                                else
+                                    bounds.mins.x = math.min(bounds.mins.x, position.x)
+                                    bounds.mins.y = math.min(bounds.mins.y, position.y)
+                                    bounds.mins.z = math.min(bounds.mins.z, position.z)
+                                    bounds.maxs.x = math.max(bounds.maxs.x, position.x)
+                                    bounds.maxs.y = math.max(bounds.maxs.y, position.y)
+                                    bounds.maxs.z = math.max(bounds.maxs.z, position.z)
+                                end
+
+                                local color = vertex.color or color_white
+                                mesh.Position(position)
+                                mesh.Normal(normal)
+                                mesh.TexCoord(0, vertex.u or 0, vertex.v or 0)
+                                mesh.Color(color.r or 255, color.g or 255, color.b or 255, color.a or 255)
+                                mesh.AdvanceVertex()
                             end
-
-                            local color = vertex.color or color_white
-                            mesh.Position(position)
-                            mesh.Normal(normal)
-                            mesh.TexCoord(0, vertex.u or 0, vertex.v or 0)
-                            mesh.Color(color.r or 255, color.g or 255, color.b or 255, color.a or 255)
-                            mesh.AdvanceVertex()
                         end
                     end
                     if stats then transformTime = transformTime + profileClock() - transformStartedAt end
