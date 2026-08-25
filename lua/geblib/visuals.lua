@@ -331,6 +331,7 @@ if hook and hook.Add then
         if stats then stats.renderHooks = stats.renderHooks + 1 end
         local now = CurTime()
         local renderEnabled = Visuals.DebrisRenderEnabled ~= false
+        local localLightsCleared = false
 
         for index = #debrisBatches, 1, -1 do
             local batch = debrisBatches[index]
@@ -343,6 +344,10 @@ if hook and hook.Add then
                 if stats then stats.expired = stats.expired + 1 end
             elseif renderEnabled then
                 if not util.IsBoxVisible or util.IsBoxVisible(batch.mins, batch.maxs) then
+                    if not localLightsCleared then
+                        render.SetLocalModelLights()
+                        localLightsCleared = true
+                    end
                     establishBatchLighting(batch, now, stats)
                     render.SetBlend(math.min(remaining, 1))
                     for meshIndex = 1, #batch.meshes do
