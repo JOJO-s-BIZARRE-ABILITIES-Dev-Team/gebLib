@@ -4,7 +4,8 @@ local function createVisualRuntime(Visuals)
     local PHYSICS_TIMER_NAME = "gebLib.Visuals.DebrisPhysics"
     local GROW_TIME = 0.25
     local PHYSICS_SCAN_INTERVAL = 0.25
-    local PHYSICS_SCAN_BUDGET = 256
+    local PHYSICS_MIN_SCAN_BUDGET = 256
+    local PHYSICS_TARGET_SWEEP_TIME = 0.5
     local PHYSICS_MIN_AGE = 0.5
     local SLEEP_CONFIRMATIONS = 2
     local profile
@@ -110,6 +111,17 @@ local function createVisualRuntime(Visuals)
         updatePhysicsTimer()
     end
 
+    local function physicsScanBudget(count)
+        if count == 0 then return 0 end
+        return math.min(
+            count,
+            math.max(
+                PHYSICS_MIN_SCAN_BUDGET,
+                math.ceil(count * PHYSICS_SCAN_INTERVAL / PHYSICS_TARGET_SWEEP_TIME)
+            )
+        )
+    end
+
     scanPhysics = function()
         if not Visuals.RetireSettledPhysics or Visuals.DebrisPhysicsEnabled == false then
             updatePhysicsTimer()
@@ -120,7 +132,7 @@ local function createVisualRuntime(Visuals)
         local startedAt = stats and profile.Now()
         if stats then stats.scans = stats.scans + 1 end
         local checked = 0
-        local scanLimit = math.min(PHYSICS_SCAN_BUDGET, #physicalDebris)
+        local scanLimit = physicsScanBudget(#physicalDebris)
         local now = CurTime()
 
         while checked < scanLimit and #physicalDebris > 0 do
@@ -147,6 +159,12 @@ local function createVisualRuntime(Visuals)
                             entity.gebLib_DebrisRetiredPhysics = true
                             removePhysicalAt(physicsScanIndex)
                             if stats then stats.retired = stats.retired + 1 end
+                            if entity.gebLib_DebrisPromoteWhenSettled
+                                and entity.gebLib_DebrisFadePending
+                                and Visuals.QueueRetiredDebris
+                            then
+                                Visuals.QueueRetiredDebris(entity)
+                            end
                         else
                             entity.gebLib_DebrisSleepChecks = 0
                             physicsScanIndex = physicsScanIndex + 1
@@ -165,6 +183,8 @@ local function createVisualRuntime(Visuals)
 
         if stats then
             stats.checks = stats.checks + checked
+            stats.scanBudgetTotal = stats.scanBudgetTotal + scanLimit
+            stats.maxScanBudget = math.max(stats.maxScanBudget, scanLimit)
             stats.tracked = #physicalDebris
             finishDuration(stats, "scanTime", startedAt)
         end
@@ -471,6 +491,9 @@ local function createVisualRuntime(Visuals)
             render = Visuals.DebrisRenderEnabled ~= false,
             physics = Visuals.DebrisPhysicsEnabled ~= false,
             trackedPhysics = #physicalDebris,
+            scanBudget = physicsScanBudget(#physicalDebris),
+            scanInterval = PHYSICS_SCAN_INTERVAL,
+            targetSweepTime = PHYSICS_TARGET_SWEEP_TIME,
         }
     end
 

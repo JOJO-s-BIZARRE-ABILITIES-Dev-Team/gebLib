@@ -40,7 +40,9 @@ local Profile
 local profileClock
 local recordDuration
 local BATCH_HOOK_NAME = "gebLib.Visuals.DebrisBatches"
+local PROMOTION_HOOK_NAME = "gebLib.Visuals.DebrisPromotions"
 local MAX_BATCH_VERTICES = 60000
+local MAX_PROMOTION_PIECES_PER_FRAME = 16
 local BATCH_LIGHTING_INTERVAL = 0.25
 local BATCH_LIGHTING_DIRECTIONS = {
     {BOX_FRONT, Vector(1, 0, 0)},
@@ -53,10 +55,16 @@ local BATCH_LIGHTING_DIRECTIONS = {
 local debrisBatches = {}
 local activeBatchPieces = 0
 local modelMeshCache = {}
+local promotionQueue = {}
+local promotionGroups = {}
+local promotionHead = 1
+local promotionTail = 0
+local pendingPromotionPieces = 0
 Visuals.StaticBatchingDefault = Visuals.StaticBatchingDefault ~= false
 local staticBatchingEnabled = Visuals.StaticBatchingDefault
 
 if hook and hook.Remove then hook.Remove("PostDrawOpaqueRenderables", BATCH_HOOK_NAME) end
+if hook and hook.Remove then hook.Remove("Think", PROMOTION_HOOK_NAME) end
 
 local function batchStats()
     if not Profile or not Profile.IsActive() then return end
@@ -70,7 +78,26 @@ local function destroyBatch(batch)
     end
 end
 
+local function clearPromotionQueue()
+    for queueIndex = promotionHead, promotionTail do
+        local group = promotionQueue[queueIndex]
+        if group then
+            for entityIndex = group.head, group.tail do
+                local entity = group.entities[entityIndex]
+                if IsValid(entity) then entity.gebLib_DebrisPromotionQueued = nil end
+            end
+        end
+    end
+    promotionQueue = {}
+    promotionGroups = {}
+    promotionHead = 1
+    promotionTail = 0
+    pendingPromotionPieces = 0
+    if hook and hook.Remove then hook.Remove("Think", PROMOTION_HOOK_NAME) end
+end
+
 function Visuals.ClearDebrisBatches()
+    clearPromotionQueue()
     for index = #debrisBatches, 1, -1 do
         destroyBatch(debrisBatches[index])
         debrisBatches[index] = nil
@@ -80,6 +107,7 @@ end
 
 function Visuals.SetDebrisStaticBatching(enabled)
     staticBatchingEnabled = enabled == true
+    if not staticBatchingEnabled then clearPromotionQueue() end
     return staticBatchingEnabled
 end
 
@@ -88,6 +116,7 @@ function Visuals.GetDebrisBatchState()
         enabled = staticBatchingEnabled,
         batches = #debrisBatches,
         pieces = activeBatchPieces,
+        pendingPromotions = pendingPromotionPieces,
     }
 end
 
@@ -153,7 +182,7 @@ local function appendBatchSource(group, piece, triangles)
     return true
 end
 
-local function buildStaticBatch(pieces, lifetime, shadows)
+local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
     if #pieces == 0 or not Mesh or not mesh or not mesh.Begin or not util.GetModelMeshes then return false end
     local stats = batchStats()
     local totalStartedAt = stats and profileClock()
@@ -284,7 +313,7 @@ local function buildStaticBatch(pieces, lifetime, shadows)
         center = center,
         mins = bounds.mins,
         maxs = bounds.maxs,
-        expiresAt = CurTime() + lifetime,
+        expiresAt = expiresAt or CurTime() + lifetime,
         pieceCount = #pieces,
         shadowsRequested = shadows,
     }
@@ -296,6 +325,120 @@ local function buildStaticBatch(pieces, lifetime, shadows)
         stats.meshes = stats.meshes + #built
         stats.vertices = stats.vertices + vertices
         if shadows then stats.shadowedPieces = stats.shadowedPieces + #pieces end
+    end
+    return true
+end
+
+local function processPromotionQueue()
+    local group = promotionQueue[promotionHead]
+    if not group then
+        clearPromotionQueue()
+        return
+    end
+
+    local stats = batchStats()
+    local startedAt = stats and profileClock()
+    local now = CurTime()
+    local pieces = {}
+    local entities = {}
+    local expiresAt
+
+    while #pieces < MAX_PROMOTION_PIECES_PER_FRAME and group.head <= group.tail do
+        local entity = group.entities[group.head]
+        group.entities[group.head] = nil
+        group.head = group.head + 1
+        pendingPromotionPieces = pendingPromotionPieces - 1
+
+        if IsValid(entity) then entity.gebLib_DebrisPromotionQueued = nil end
+        local entityExpiry = IsValid(entity) and entity.gebLib_DebrisExpiresAt
+        if staticBatchingEnabled
+            and IsValid(entity)
+            and entity.gebLib_DebrisFadePending
+            and entityExpiry
+            and entityExpiry - now > 1
+        then
+            local modelPath = entity:GetModel()
+            if modelPath and modelPath ~= "" then
+                local material = entity:GetMaterial()
+                pieces[#pieces + 1] = {
+                    modelPath = modelPath,
+                    position = entity:GetPos(),
+                    angles = entity:GetAngles(),
+                    scale = entity:GetModelScale(),
+                    material = material ~= "" and material or nil,
+                }
+                entities[#entities + 1] = entity
+                expiresAt = math.min(expiresAt or entityExpiry, entityExpiry)
+            elseif stats then
+                stats.promotionSkipped = stats.promotionSkipped + 1
+            end
+        elseif stats then
+            stats.promotionSkipped = stats.promotionSkipped + 1
+        end
+    end
+
+    if group.head > group.tail then
+        promotionGroups[group.key] = nil
+        promotionQueue[promotionHead] = nil
+        promotionHead = promotionHead + 1
+    end
+
+    if #pieces > 0 then
+        local ok, built = pcall(buildStaticBatch, pieces, 0, group.shadows, expiresAt)
+        if ok and built then
+            for index = 1, #entities do
+                local entity = entities[index]
+                if IsValid(entity) then entity:Remove() end
+            end
+            if stats then stats.promotedPieces = stats.promotedPieces + #entities end
+        elseif stats then
+            if not ok then stats.failures = stats.failures + 1 end
+            stats.promotionFailed = stats.promotionFailed + #entities
+        end
+    end
+
+    if stats then
+        stats.promotionRuns = stats.promotionRuns + 1
+        local elapsed = profileClock() - startedAt
+        stats.promotionTime = stats.promotionTime + elapsed
+        stats.maxPromotionTime = math.max(stats.maxPromotionTime, elapsed)
+    end
+    if promotionHead > promotionTail then clearPromotionQueue() end
+end
+
+function Visuals.QueueRetiredDebris(entity)
+    if not staticBatchingEnabled
+        or not IsValid(entity)
+        or entity.gebLib_DebrisPromotionQueued
+        or not entity.gebLib_DebrisFadePending
+    then
+        return false
+    end
+
+    local wasEmpty = pendingPromotionPieces == 0
+    local key = entity.gebLib_DebrisBatchGroup or entity
+    local group = promotionGroups[key]
+    if not group then
+        group = {
+            key = key,
+            shadows = entity.gebLib_DebrisBatchShadows == true,
+            entities = {},
+            head = 1,
+            tail = 0,
+        }
+        promotionGroups[key] = group
+        promotionTail = promotionTail + 1
+        promotionQueue[promotionTail] = group
+    end
+
+    group.tail = group.tail + 1
+    group.entities[group.tail] = entity
+    entity.gebLib_DebrisPromotionQueued = true
+    pendingPromotionPieces = pendingPromotionPieces + 1
+    local stats = batchStats()
+    if stats then stats.promotionsQueued = stats.promotionsQueued + 1 end
+    if wasEmpty and hook and hook.Add then
+        hook.Add("Think", PROMOTION_HOOK_NAME, processPromotionQueue)
     end
     return true
 end
@@ -788,6 +931,7 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
     local physicsMaterial = impactPhysicsMaterial(materialType)
     local spawned = 0
     local batchedModels = staticBatchingEnabled and {} or nil
+    local propBatchGroup = staticBatchingEnabled and propCount > 0 and {} or nil
     if profiling then recordDuration(impactStats, "preparationTime", preparationStartedAt) end
 
     local loopStartedAt = profiling and profileClock()
@@ -987,6 +1131,11 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
                         impactStats.abOptimizedTime = impactStats.abOptimizedTime + comparisonTime
                         if IsValid(physics) then impactStats.abOptimizedPhysics = impactStats.abOptimizedPhysics + 1 end
                     end
+                end
+                if staticBatchingEnabled then
+                    entity.gebLib_DebrisPromoteWhenSettled = true
+                    entity.gebLib_DebrisBatchGroup = propBatchGroup
+                    entity.gebLib_DebrisBatchShadows = shadows
                 end
                 Visuals.RefreshDebrisPhysics(entity)
                 spawned = spawned + 1

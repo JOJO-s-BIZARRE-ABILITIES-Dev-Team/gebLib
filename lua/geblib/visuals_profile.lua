@@ -83,6 +83,7 @@ local function createDebrisProfile(Visuals, getDebris)
             retirement = {
                 tracked = 0, peakTracked = 0,
                 scans = 0, scanTime = 0, checks = 0,
+                scanBudgetTotal = 0, maxScanBudget = 0,
                 awakeChecks = 0, sleepingChecks = 0,
                 retired = 0, failures = 0, invalid = 0, missing = 0,
             },
@@ -96,6 +97,9 @@ local function createDebrisProfile(Visuals, getDebris)
                 lightingSamples = 0, lightingTime = 0, maxLightingTime = 0,
                 renderHooks = 0, drawnBatches = 0, culledBatches = 0, drawCalls = 0,
                 drawTime = 0, maxDrawTime = 0,
+                promotionsQueued = 0, promotionRuns = 0,
+                promotedPieces = 0, promotionSkipped = 0, promotionFailed = 0,
+                promotionTime = 0, maxPromotionTime = 0,
             },
             frames = {
                 count = 0, totalTime = 0, minTime = math.huge, maxTime = 0,
@@ -628,8 +632,20 @@ local function createDebrisProfile(Visuals, getDebris)
             "physics retirement scans: " .. retirement.scans .. " scans, "
                 .. retirement.checks .. " checks (" .. retirement.awakeChecks .. " awake, "
                 .. retirement.sleepingChecks .. " asleep), "
+                .. string.format("%.1f", retirement.scanBudgetTotal / math.max(retirement.scans, 1))
+                .. " average budget, " .. retirement.maxScanBudget .. " maximum budget, "
+                .. (runtimeState.scanBudget or 0) .. " current budget, "
+                .. string.format("%.2f", runtimeState.targetSweepTime or 0.5) .. "s sweep target, "
                 .. milliseconds(retirement.scanTime / math.max(retirement.scans, 1)) .. " per scan, "
                 .. milliseconds(retirement.scanTime / math.max(retirement.checks, 1)) .. " per check"
+        )
+        profilePrint(
+            "retired prop promotion: " .. batching.promotionsQueued .. " queued, "
+                .. batching.promotedPieces .. " promoted, " .. batching.promotionSkipped
+                .. " skipped, " .. batching.promotionFailed .. " failed, "
+                .. (batchState.pendingPromotions or 0) .. " pending; "
+                .. milliseconds(batching.promotionTime / math.max(batching.promotionRuns, 1))
+                .. " per run, " .. milliseconds(batching.maxPromotionTime) .. " maximum"
         )
         if batching.created > 0 or batching.failures > 0 or batchState.pieces > 0 then
             profilePrint(
