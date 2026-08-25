@@ -1,4 +1,4 @@
-local function installDebrisWave(Visuals, Runtime, Surface, Config)
+local function installDebrisWave(Visuals, Runtime, Surface, Config, Profile)
     local previous = gebLib._VisualsWaveState
     if previous then
         Runtime.Unregister(previous.scheduler)
@@ -12,6 +12,17 @@ local function installDebrisWave(Visuals, Runtime, Surface, Config)
     local activeDebrisWaves = state.waves
     local waveScheduler = state.scheduler
     local surfaceMaterialAt = Surface.MaterialAt
+    local profileClock = Profile and Profile.Now or SysTime or os.clock
+
+local function profileWaves()
+    if not Profile or not Profile.IsActive() then return end
+    return Profile.Data().waves
+end
+
+local function recordDuration(stats, key, startedAt)
+    if not stats then return 0 end
+    return Profile.RecordDuration(stats, key, startedAt)
+end
 
 local DebrisWave = {}
 DebrisWave.__index = DebrisWave
@@ -25,7 +36,10 @@ end
 
 local function waveCallback(callback, wave, label, ...)
     if type(callback) ~= "function" then return true end
-    return Runtime.Invoke(
+    local stats = profileWaves()
+    local startedAt = stats and profileClock()
+    if stats then stats.callbackCalls = stats.callbackCalls + 1 end
+    local ok, result = Runtime.Invoke(
         wave,
         "Debris Wave " .. label,
         callback,
@@ -35,6 +49,8 @@ local function waveCallback(callback, wave, label, ...)
         wave,
         ...
     )
+    if stats then recordDuration(stats, "callbackTime", startedAt) end
+    return ok, result
 end
 
 local function removeActiveWave(wave)
@@ -57,6 +73,14 @@ local function finishDebrisWave(wave, cancelled)
 
     wave.Active = false
     removeActiveWave(wave)
+    local stats = profileWaves()
+    if stats then
+        if cancelled then
+            stats.cancelled = stats.cancelled + 1
+        else
+            stats.completed = stats.completed + 1
+        end
+    end
     if cancelled then
         waveCallback(wave.OnCancel, wave, "cancel callback")
     else
@@ -105,7 +129,7 @@ local function impactTouchesWater(position, normal)
     return bit.band(contents, CONTENTS_WATER) ~= 0
 end
 
-local function traceDebrisWaveFloor(wave, position)
+local function traceDebrisWaveFloor(wave, position, stats)
     local floor = wave.FloorConfig
     if not floor then return position, wave.Material, wave.MaterialType, wave.PhysicsMaterial end
 
@@ -121,7 +145,9 @@ local function traceDebrisWaveFloor(wave, position)
     local traceData = floor.TraceData
     traceData.start = position + vector_up * floor.StartHeight
     traceData.endpos = position - vector_up * floor.Depth
+    local traceStartedAt = stats and profileClock()
     util.TraceLine(traceData)
+    if stats then recordDuration(stats, "floorTraceTime", traceStartedAt) end
 
     local normal = trace.HitNormal
     if not trace.Hit
@@ -134,10 +160,13 @@ local function traceDebrisWaveFloor(wave, position)
         return nil, nil, nil, nil, trace
     end
 
+    local waterCheckStartedAt = stats and profileClock()
     local traceMaterialType = trace.MatType
     if traceMaterialType ~= MAT_SLOSH and impactTouchesWater(trace.HitPos, normal) then
         traceMaterialType = MAT_SLOSH
     end
+    if stats then recordDuration(stats, "waterCheckTime", waterCheckStartedAt) end
+    local surfaceStartedAt = stats and profileClock()
     local sampledMaterial, materialType = surfaceMaterialAt(
         trace.HitPos,
         normal,
@@ -145,6 +174,7 @@ local function traceDebrisWaveFloor(wave, position)
         traceMaterialType,
         false
     )
+    if stats then recordDuration(stats, "surfaceTime", surfaceStartedAt) end
     local surfaceColor
     if sampledMaterial == nil
         and wave.Material == nil
@@ -153,6 +183,7 @@ local function traceDebrisWaveFloor(wave, position)
         and render
         and render.GetSurfaceColor
     then
+        local colorStartedAt = stats and profileClock()
         local colorVector = render.GetSurfaceColor(traceData.start, traceData.endpos)
         if colorVector then
             surfaceColor = Color(
@@ -161,6 +192,7 @@ local function traceDebrisWaveFloor(wave, position)
                 math.Clamp(math.floor(colorVector.z * 255 + 0.5), 0, 255)
             )
         end
+        if stats then recordDuration(stats, "colorTime", colorStartedAt) end
     end
     local material = sampledMaterial or wave.Material
 
@@ -172,6 +204,14 @@ local function traceDebrisWaveFloor(wave, position)
         surfaceColor
 end
 
+local function finishWaveStepProfile(stats, startedAt, wave, spawnedBefore, skipped)
+    if not stats then return end
+    local elapsed = recordDuration(stats, "stepTime", startedAt)
+    stats.maxStepTime = math.max(stats.maxStepTime, elapsed)
+    stats.spawned = stats.spawned + wave.Spawned - spawnedBefore
+    if skipped then stats.skipped = stats.skipped + 1 end
+end
+
 local function finishDebrisWaveStep(wave, step, position, floorTrace)
     local event = wave.Events and wave.Events[step]
     if not waveCallback(event, wave, "event " .. step, step) then return false end
@@ -179,6 +219,12 @@ local function finishDebrisWaveStep(wave, step, position, floorTrace)
 end
 
 local function spawnDebrisWaveStep(wave, step)
+    local stats = profileWaves()
+    local stepStartedAt = stats and profileClock()
+    local spawnedBefore = wave.Spawned
+    if stats then stats.steps = stats.steps + 1 end
+
+    local positionStartedAt = stats and profileClock()
     local lateral
     if wave.IntegerSpread then
         local spread = math.floor(wave.Spread)
@@ -190,17 +236,24 @@ local function spawnDebrisWaveStep(wave, step)
     local projectedPosition = wave.Origin
         + wave.Direction * (wave.DistanceStep * step)
         + wave.SpreadAxis * lateral
+    if stats then recordDuration(stats, "positionTime", positionStartedAt) end
+
+    local floorStartedAt = stats and profileClock()
     local position, material, materialType, physicsMaterial, floorTrace, surfaceColor =
-        traceDebrisWaveFloor(wave, projectedPosition)
+        traceDebrisWaveFloor(wave, projectedPosition, stats)
+    if stats then recordDuration(stats, "floorTime", floorStartedAt) end
 
     if not position then
         wave.Skipped = wave.Skipped + 1
         finishDebrisWaveStep(wave, step, nil, floorTrace)
+        finishWaveStepProfile(stats, stepStartedAt, wave, spawnedBefore, true)
         return
     end
 
     if materialType == MAT_SLOSH then
         if wave.WaterConfig ~= false then
+            local waterStartedAt = stats and profileClock()
+            if stats then stats.waterSteps = stats.waterSteps + 1 end
             local waterConfig = wave.WaterConfig
             local waterStrength = waveNumber(waterConfig.strength, 22, 1)
             wave.Spawned = wave.Spawned + Visuals.CreateWaterDebris(
@@ -209,29 +262,50 @@ local function spawnDebrisWaveStep(wave, step)
                 waterStrength,
                 waterConfig
             )
+            if stats then recordDuration(stats, "waterTime", waterStartedAt) end
         end
         finishDebrisWaveStep(wave, step, position, floorTrace)
+        finishWaveStepProfile(stats, stepStartedAt, wave, spawnedBefore, false)
         return
     end
 
     local propConfig = wave.PropConfig
     if propConfig then
+        if stats then stats.propRequests = stats.propRequests + 1 end
+        local modelPathStartedAt = stats and profileClock()
+        local propModelPath = waveModelPath(wave, step, true, materialType)
+        if stats then recordDuration(stats, "modelPathTime", modelPathStartedAt) end
+        local propCreateStartedAt = stats and profileClock()
         local prop = Visuals.CreateDebris(
-            waveModelPath(wave, step, true, materialType),
+            propModelPath,
             true,
             wave.Lifetime,
             wave.PreserveCount,
             material
         )
+        if stats then recordDuration(stats, "propCreateTime", propCreateStartedAt) end
         if IsValid(prop) then
+            if stats then stats.props = stats.props + 1 end
+            local propSetupStartedAt = stats and profileClock()
+            local transformStartedAt = stats and profileClock()
             if surfaceColor then prop:SetColor(surfaceColor) end
             prop:SetPos(position + (propConfig.offset or vector_origin))
             prop:SetAngles(waveAngle(propConfig, wave, step))
             prop:SetModelScale(waveScale(propConfig), 0)
             prop:SetCollisionGroup(propConfig.collisionGroup or COLLISION_GROUP_DEBRIS or 3)
-            if propConfig.spawn ~= false then prop:Spawn() end
-            if propConfig.activate ~= false then prop:Activate() end
+            if stats then recordDuration(stats, "propTransformTime", transformStartedAt) end
+            if propConfig.spawn ~= false then
+                local spawnStartedAt = stats and profileClock()
+                prop:Spawn()
+                if stats then recordDuration(stats, "propSpawnTime", spawnStartedAt) end
+            end
+            if propConfig.activate ~= false then
+                local activateStartedAt = stats and profileClock()
+                prop:Activate()
+                if stats then recordDuration(stats, "propActivateTime", activateStartedAt) end
+            end
 
+            local physicsStartedAt = stats and profileClock()
             local physics = prop:GetPhysicsObject()
             if IsValid(physics) then
                 local velocity = propConfig.velocity or vector_origin
@@ -247,35 +321,58 @@ local function spawnDebrisWaveStep(wave, step)
                 end
                 physics:SetMaterial(propConfig.physicsMaterial or physicsMaterial)
             end
+            if stats then
+                recordDuration(stats, "propPhysicsTime", physicsStartedAt)
+                recordDuration(stats, "propSetupTime", propSetupStartedAt)
+            end
 
             wave.Spawned = wave.Spawned + 1
-            if not waveCallback(propConfig.setup, wave, "prop setup callback", prop, step) then return end
+            if not waveCallback(propConfig.setup, wave, "prop setup callback", prop, step) then
+                finishWaveStepProfile(stats, stepStartedAt, wave, spawnedBefore, false)
+                return
+            end
         end
     end
 
     local modelConfig = wave.ModelConfig
     if modelConfig then
+        if stats then stats.modelRequests = stats.modelRequests + 1 end
+        local modelPathStartedAt = stats and profileClock()
+        local modelPath = waveModelPath(wave, step, false, materialType)
+        if stats then recordDuration(stats, "modelPathTime", modelPathStartedAt) end
+        local modelCreateStartedAt = stats and profileClock()
         local model = Visuals.CreateDebris(
-            waveModelPath(wave, step, false, materialType),
+            modelPath,
             false,
             wave.Lifetime,
             wave.PreserveCount,
             material
         )
+        if stats then recordDuration(stats, "modelCreateTime", modelCreateStartedAt) end
         if IsValid(model) then
+            if stats then stats.models = stats.models + 1 end
+            local modelSetupStartedAt = stats and profileClock()
             if surfaceColor then model:SetColor(surfaceColor) end
             model:SetPos(position + (modelConfig.offset or vector_origin))
             model:SetAngles(waveAngle(modelConfig, wave, step))
             model:SetModelScale(waveScale(modelConfig), 0)
+            if stats then recordDuration(stats, "modelSetupTime", modelSetupStartedAt) end
             wave.Spawned = wave.Spawned + 1
-            if not waveCallback(modelConfig.setup, wave, "model setup callback", model, step) then return end
+            if not waveCallback(modelConfig.setup, wave, "model setup callback", model, step) then
+                finishWaveStepProfile(stats, stepStartedAt, wave, spawnedBefore, false)
+                return
+            end
         end
     end
 
     finishDebrisWaveStep(wave, step, position, floorTrace)
+    finishWaveStepProfile(stats, stepStartedAt, wave, spawnedBefore, false)
 end
 
 local function processDebrisWaves()
+    local stats = profileWaves()
+    local startedAt = stats and profileClock()
+    if stats then stats.schedulerCalls = stats.schedulerCalls + 1 end
     local now = CurTime()
     local activeIndex = #activeDebrisWaves
 
@@ -310,6 +407,7 @@ local function processDebrisWaves()
         activeIndex = activeIndex - 1
     end
 
+    if stats then recordDuration(stats, "schedulerTime", startedAt) end
     return #activeDebrisWaves > 0
 end
 
@@ -354,8 +452,16 @@ function DebrisWave:Cancel()
 end
 
 function Visuals.CreateDebrisWave(options)
+    local stats = profileWaves()
+    local planStartedAt = stats and profileClock()
     local plan = Config.Wave(options)
+    if stats then recordDuration(stats, "planTime", planStartedAt) end
     if not plan then return end
+
+    if stats then
+        stats.created = stats.created + 1
+        stats.requestedSteps = stats.requestedSteps + plan.Count
+    end
 
     local wave = setmetatable(plan, DebrisWave)
     wave.ActiveIndex = #activeDebrisWaves + 1
@@ -375,4 +481,3 @@ end
 end
 
 return installDebrisWave
-
