@@ -238,8 +238,13 @@ local function createVisualRuntime(Visuals)
         return removed
     end
 
-    local drawDebris
     local processDue
+
+    local function beginNativeFade(entity)
+        entity.gebLib_DebrisFadePending = nil
+        entity:SetRenderMode(RENDERMODE_TRANSCOLOR)
+        entity:SetRenderFX(kRenderFxFadeFast)
+    end
 
     local function schedule()
         local lifecycle = profileData("lifecycle")
@@ -277,9 +282,8 @@ local function createVisualRuntime(Visuals)
 
         while entity and (not IsValid(entity) or now >= eventAt(entity)) do
             if IsValid(entity) and entity.gebLib_DebrisFadePending then
-                entity.gebLib_DebrisFadePending = nil
+                beginNativeFade(entity)
                 entity.gebLib_DebrisEventAt = entity.gebLib_DebrisExpiresAt
-                entity.RenderOverride = drawDebris
                 siftDown(1)
                 if lifecycle then lifecycle.fadeTransitions = lifecycle.fadeTransitions + 1 end
             else
@@ -288,7 +292,6 @@ local function createVisualRuntime(Visuals)
                 if IsValid(entity) then
                     entity.gebLib_DebrisEventAt = nil
                     entity.gebLib_DebrisExpiresAt = nil
-                    entity.RenderOverride = nil
                     entity:Remove()
                 end
                 if lifecycle then
@@ -319,46 +322,6 @@ local function createVisualRuntime(Visuals)
         entity.gebLib_DebrisFadePending = nil
         if wasFirst then schedule() end
         if lifecycle then finishDuration(lifecycle, "removeTime", startedAt) end
-    end
-
-    drawDebris = function(entity)
-        local lifecycle = profileData("lifecycle")
-        local startedAt = lifecycle and profile.Now()
-        if lifecycle then lifecycle.fadeDrawCalls = lifecycle.fadeDrawCalls + 1 end
-        local expiry = entity.gebLib_DebrisExpiresAt
-        if not expiry then
-            entity:DrawModel()
-            if lifecycle then
-                local elapsed = finishDuration(lifecycle, "fadeDrawTime", startedAt)
-                lifecycle.maxFadeDrawTime = math.max(lifecycle.maxFadeDrawTime, elapsed)
-            end
-            return
-        end
-
-        local remaining = expiry - CurTime()
-        if remaining <= 0 then
-            if lifecycle then
-                local elapsed = finishDuration(lifecycle, "fadeDrawTime", startedAt)
-                lifecycle.maxFadeDrawTime = math.max(lifecycle.maxFadeDrawTime, elapsed)
-            end
-            return
-        end
-        if remaining >= 1 then
-            entity:DrawModel()
-            if lifecycle then
-                local elapsed = finishDuration(lifecycle, "fadeDrawTime", startedAt)
-                lifecycle.maxFadeDrawTime = math.max(lifecycle.maxFadeDrawTime, elapsed)
-            end
-            return
-        end
-
-        render.SetBlend(remaining)
-        entity:DrawModel()
-        render.SetBlend(1)
-        if lifecycle then
-            local elapsed = finishDuration(lifecycle, "fadeDrawTime", startedAt)
-            lifecycle.maxFadeDrawTime = math.max(lifecycle.maxFadeDrawTime, elapsed)
-        end
     end
 
     function Visuals.CreateDebris(modelPath, clientProp, lifetime, ignoreLimit, material, animateGrowth)
@@ -406,7 +369,7 @@ local function createVisualRuntime(Visuals)
             entity.gebLib_DebrisFadePending = true
         else
             entity.gebLib_DebrisEventAt = expiry
-            entity.RenderOverride = drawDebris
+            beginNativeFade(entity)
         end
         if stats then finishDuration(stats, "lifetimeTime", lifetimeStartedAt) end
 
@@ -546,7 +509,6 @@ local function createVisualRuntime(Visuals)
             entity.gebLib_DebrisSleepChecks = nil
             entity.gebLib_DebrisMotionWasEnabled = nil
             entity.gebLib_DebrisNoDrawWas = nil
-            entity.RenderOverride = nil
             if IsValid(entity) then entity:Remove() end
         end
         for index = #physicalDebris, 1, -1 do physicalDebris[index] = nil end

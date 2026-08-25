@@ -34,6 +34,8 @@ function VectorRand(minimum, maximum) return Vector(maximum, minimum, maximum) e
 vector_origin = Vector(0, 0, 0)
 angle_zero = {}
 color_white = {r = 255, g = 255, b = 255, a = 255}
+RENDERMODE_TRANSCOLOR = 1
+kRenderFxFadeFast = 6
 math.Rand = math.Rand or function(minimum, maximum) return (minimum + maximum) / 2 end
 
 timer = {}
@@ -89,6 +91,8 @@ local function newEntity()
     end
     function entity:CallOnRemove(name, callback) self.removeCallbacks[name] = callback end
     function entity:DrawModel() end
+    function entity:SetRenderMode(mode) self.renderMode = mode end
+    function entity:SetRenderFX(effect) self.renderFX = effect end
     function entity:Remove()
         if not self.valid then return end
         self.valid = false
@@ -125,25 +129,6 @@ for frame = 1, frameCount do
 end
 local idleElapsed = os.clock() - idleStarted
 
-local renderOverrides = {}
-for index = 1, #entities do
-    local entity = entities[index]
-    if IsValid(entity) and entity.RenderOverride then
-        renderOverrides[#renderOverrides + 1] = entity
-    end
-end
-
-local visibleStarted = os.clock()
-for frame = 1, frameCount do
-    now = frame / 60
-    for index = 1, #renderOverrides do
-        local entity = renderOverrides[index]
-        entity.RenderOverride(entity)
-    end
-end
-local visibleElapsed = os.clock() - visibleStarted
-local visibleCallbacks = #renderOverrides * frameCount
-
 local function activeCount()
     if gebLib.Visuals.GetDebrisCount then return gebLib.Visuals.GetDebrisCount() end
 
@@ -171,6 +156,26 @@ local fadeStarted = os.clock()
 runDueTimers()
 local fadeElapsed = os.clock() - fadeStarted
 
+local renderOverrides = {}
+local nativeFades = 0
+for index = 1, #entities do
+    local entity = entities[index]
+    if IsValid(entity) and entity.RenderOverride then
+        renderOverrides[#renderOverrides + 1] = entity
+    end
+    if IsValid(entity) and entity.renderFX == kRenderFxFadeFast then nativeFades = nativeFades + 1 end
+end
+
+local visibleStarted = os.clock()
+for frame = 1, frameCount do
+    for index = 1, #renderOverrides do
+        local entity = renderOverrides[index]
+        entity.RenderOverride(entity)
+    end
+end
+local visibleElapsed = os.clock() - visibleStarted
+local visibleCallbacks = #renderOverrides * frameCount
+
 now = lifetime
 local expireStarted = os.clock()
 runDueTimers()
@@ -191,10 +196,11 @@ print("gebLib debris local Lua benchmark")
 print(string.format("%d debris created in %.3f ms", debrisCount, createElapsed * 1000))
 print(string.format("%d idle frames in %.3f ms", frameCount, idleElapsed * 1000))
 print(string.format(
-    "%d full-opacity Lua render callbacks in %.3f ms",
+    "%d Lua fade render callbacks in %.3f ms",
     visibleCallbacks,
     visibleElapsed * 1000
 ))
+print(string.format("%d native entity fades started", nativeFades))
 print(string.format("fade scheduling completed in %.3f ms", fadeElapsed * 1000))
 print(string.format("%d debris expired in %.3f ms", debrisCount, expireElapsed * 1000))
 if burstElapsed then

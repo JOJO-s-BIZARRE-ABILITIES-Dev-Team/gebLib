@@ -79,7 +79,6 @@ local function createDebrisProfile(Visuals, getDebris)
                 fadeTransitions = 0, expirations = 0, invalidDropped = 0,
                 removeCallbacks = 0, removeTime = 0,
                 manualRemovals = 0, clearCalls = 0, cleared = 0,
-                fadeDrawCalls = 0, fadeDrawTime = 0, maxFadeDrawTime = 0,
             },
             retirement = {
                 tracked = 0, peakTracked = 0,
@@ -608,7 +607,7 @@ local function createDebrisProfile(Visuals, getDebris)
         profilePrint(
             "lifecycle events: " .. lifecycle.timerFires .. " timer fires ("
                 .. milliseconds(lifecycle.timerTime / math.max(lifecycle.timerFires, 1))
-                .. " each), " .. lifecycle.fadeTransitions .. " fades, "
+                .. " each), " .. lifecycle.fadeTransitions .. " native fades, "
                 .. lifecycle.expirations .. " expirations, " .. lifecycle.invalidDropped
                 .. " invalid drops, " .. lifecycle.removeCallbacks .. " removal callbacks"
         )
@@ -617,11 +616,6 @@ local function createDebrisProfile(Visuals, getDebris)
                 .. lifecycle.clearCalls .. " clears (" .. lifecycle.cleared .. " entities), "
                 .. milliseconds(lifecycle.removeTime / math.max(lifecycle.removeCallbacks, 1))
                 .. " per removal callback"
-        )
-        profilePrint(
-            "fade rendering: " .. lifecycle.fadeDrawCalls .. " draws, "
-                .. milliseconds(lifecycle.fadeDrawTime / math.max(lifecycle.fadeDrawCalls, 1))
-                .. " average, " .. milliseconds(lifecycle.maxFadeDrawTime) .. " maximum"
         )
         profilePrint(
             "physics retirement: " .. retirement.retired .. " retired, "

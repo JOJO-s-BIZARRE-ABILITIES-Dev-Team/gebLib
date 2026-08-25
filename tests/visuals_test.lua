@@ -36,6 +36,8 @@ end
 vector_origin = Vector(0, 0, 0)
 angle_zero = {}
 color_white = {r = 255, g = 255, b = 255, a = 255}
+RENDERMODE_TRANSCOLOR = 1
+kRenderFxFadeFast = 6
 math.Rand = math.Rand or function(minimum, maximum) return (minimum + maximum) / 2 end
 
 timer = {}
@@ -93,6 +95,8 @@ local function newEntity(clientProp)
     end
     function entity:CallOnRemove(name, callback) self.removeCallbacks[name] = callback end
     function entity:DrawModel() self.drawCount = self.drawCount + 1 end
+    function entity:SetRenderMode(mode) self.renderMode = mode end
+    function entity:SetRenderFX(effect) self.renderFX = effect end
     function entity:Remove()
         if not self.valid then return end
         self.valid = false
@@ -178,17 +182,12 @@ do
 
     now = 4
     scheduledTimers[timerName].callback()
-    assertEqual(type(debris.RenderOverride), "function", "fade should install the render override")
+    assertEqual(debris.RenderOverride, nil, "native fade should stay on the engine draw path")
+    assertEqual(debris.renderMode, RENDERMODE_TRANSCOLOR, "native fade render mode")
+    assertEqual(debris.renderFX, kRenderFxFadeFast, "native fade effect")
     assertNear(scheduledTimers[timerName].delay, 1, 0.0001, "expiry timer after fade starts")
-    debris.RenderOverride(debris)
-    assertEqual(debris.drawCount, 1, "full-opacity draw")
-    assertEqual(#blendCalls, 0, "full-opacity draws should not touch global blend")
-
-    now = 4.5
-    debris.RenderOverride(debris)
-    assertEqual(debris.drawCount, 2, "fading draw")
-    assertNear(blendCalls[1], 0.5, 0.0001, "fade blend")
-    assertEqual(blendCalls[2], 1, "blend restoration")
+    assertEqual(debris.drawCount, 0, "native fade should not draw through Lua")
+    assertEqual(#blendCalls, 0, "native fade should not touch global blend")
 
     Visuals.ClearDebris()
     assertEqual(Visuals.GetDebrisCount(), 0, "clear debris count")
@@ -206,7 +205,8 @@ do
     now = 11
     scheduledTimers[timerName].callback()
     assertEqual(IsValid(short), true, "fade start should retain debris")
-    assertEqual(type(short.RenderOverride), "function", "fade start should install rendering")
+    assertEqual(short.RenderOverride, nil, "fade start should retain engine rendering")
+    assertEqual(short.renderFX, kRenderFxFadeFast, "fade start should install native render FX")
     assertEqual(Visuals.GetDebrisCount(), 2, "fade start should retain the active count")
     assertNear(scheduledTimers[timerName].delay, 1, 0.0001, "fading debris expiry")
 
