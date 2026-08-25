@@ -12,6 +12,7 @@ local function installDebrisWave(Visuals, Runtime, Surface, Config, Profile)
     local activeDebrisWaves = state.waves
     local waveScheduler = state.scheduler
     local surfaceMaterialAt = Surface.MaterialAt
+    local impactTouchesWater = Surface.TouchesWater
     local profileClock = Profile and Profile.Now or SysTime or os.clock
 
 local function profileWaves()
@@ -116,17 +117,6 @@ local function waveScale(config)
     local minimum = waveNumber(config.scaleMin, 1, 0)
     local maximum = waveNumber(config.scaleMax, minimum, minimum)
     return math.Rand(minimum, maximum)
-end
-
-local function impactTouchesWater(position, normal)
-    if not util or not util.PointContents or not bit or not bit.band or not CONTENTS_WATER then return false end
-
-    local surfaceNormal = normal or vector_up
-    local contents = util.PointContents(position)
-    if bit.band(contents, CONTENTS_WATER) ~= 0 then return true end
-
-    contents = util.PointContents(position - surfaceNormal * 4)
-    return bit.band(contents, CONTENTS_WATER) ~= 0
 end
 
 local function traceDebrisWaveFloor(wave, position, stats)

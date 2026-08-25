@@ -128,6 +128,7 @@ local impactModels = Surface.Models
 local impactPhysicsMaterial = Surface.PhysicsMaterial
 local impactColor = Surface.Color
 local surfaceMaterialAt = Surface.MaterialAt
+local impactTouchesWater = Surface.TouchesWater
 
 function Visuals.GetDebrisSurfaceMaterial(position, normal, hitTexture, materialType)
     return Surface.MaterialAt(position or vector_origin, normal or vector_up, hitTexture, materialType)

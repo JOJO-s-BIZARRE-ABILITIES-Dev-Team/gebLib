@@ -33,6 +33,19 @@ local ANTLION_MODELS = {
 
 Surface.RockModels = ROCK_MODELS
 
+function Surface.TouchesWater(position, normal)
+    if not util or not util.PointContents or not bit or not bit.band or not CONTENTS_WATER then
+        return false
+    end
+
+    local surfaceNormal = normal or vector_up
+    local contents = util.PointContents(position)
+    if bit.band(contents, CONTENTS_WATER) ~= 0 then return true end
+
+    contents = util.PointContents(position - surfaceNormal * 4)
+    return bit.band(contents, CONTENTS_WATER) ~= 0
+end
+
 if util and util.PrecacheModel then
     local sets = {ROCK_MODELS, METAL_MODELS, ANTLION_MODELS}
     for setIndex = 1, #sets do
