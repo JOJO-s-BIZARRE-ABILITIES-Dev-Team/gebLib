@@ -344,21 +344,41 @@ if hook and hook.Add then
                 if stats then stats.expired = stats.expired + 1 end
             elseif renderEnabled then
                 if not util.IsBoxVisible or util.IsBoxVisible(batch.mins, batch.maxs) then
-                    if not localLightsCleared then
-                        render.SetLocalModelLights()
-                        localLightsCleared = true
+                    local blend = 1
+                    if remaining <= 1 then
+                        batch.fadeAlpha = math.max((batch.fadeAlpha or 255) - 4, 0)
+                        blend = batch.fadeAlpha / 255
                     end
-                    establishBatchLighting(batch, now, stats)
-                    render.SetBlend(math.min(remaining, 1))
-                    for meshIndex = 1, #batch.meshes do
-                        local drawing = batch.meshes[meshIndex]
-                        render.SetMaterial(drawing.material)
-                        drawing.mesh:Draw()
-                    end
-                    render.SetBlend(1)
-                    if stats then
-                        stats.drawCalls = stats.drawCalls + #batch.meshes
-                        stats.drawnBatches = stats.drawnBatches + 1
+
+                    if blend > 0 then
+                        if not localLightsCleared then
+                            render.SetLocalModelLights()
+                            localLightsCleared = true
+                        end
+                        establishBatchLighting(batch, now, stats)
+                        local fading = blend < 1
+                        for meshIndex = 1, #batch.meshes do
+                            local drawing = batch.meshes[meshIndex]
+                            render.SetMaterial(drawing.material)
+                            if fading then
+                                render.OverrideBlend(
+                                    true,
+                                    BLEND_SRC_ALPHA,
+                                    BLEND_ONE_MINUS_SRC_ALPHA,
+                                    BLENDFUNC_ADD
+                                )
+                            end
+                            render.SetBlend(blend)
+                            drawing.mesh:Draw()
+                        end
+                        if fading then
+                            render.SetBlend(1)
+                            render.OverrideBlend(false, BLEND_ONE, BLEND_ZERO, BLENDFUNC_ADD)
+                        end
+                        if stats then
+                            stats.drawCalls = stats.drawCalls + #batch.meshes
+                            stats.drawnBatches = stats.drawnBatches + 1
+                        end
                     end
                 elseif stats then
                     stats.culledBatches = stats.culledBatches + 1
