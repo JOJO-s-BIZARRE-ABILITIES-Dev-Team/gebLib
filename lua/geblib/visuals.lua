@@ -359,7 +359,7 @@ local function processPromotionQueue()
         then
             local modelPath = entity:GetModel()
             if modelPath and modelPath ~= "" then
-                local material = entity:GetMaterial()
+                local material = entity.gebLib_DebrisBatchMaterial or entity:GetMaterial()
                 pieces[#pieces + 1] = {
                     modelPath = modelPath,
                     position = entity:GetPos(),
@@ -1136,6 +1136,7 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
                     entity.gebLib_DebrisPromoteWhenSettled = true
                     entity.gebLib_DebrisBatchGroup = propBatchGroup
                     entity.gebLib_DebrisBatchShadows = shadows
+                    entity.gebLib_DebrisBatchMaterial = surfaceMaterial
                 end
                 Visuals.RefreshDebrisPhysics(entity)
                 spawned = spawned + 1
