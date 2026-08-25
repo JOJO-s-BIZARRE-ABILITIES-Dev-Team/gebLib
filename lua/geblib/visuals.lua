@@ -45,6 +45,7 @@ local debrisBatches = {}
 local activeBatchPieces = 0
 local modelMeshCache = {}
 local staticBatchingEnabled = false
+local lightingProbe
 
 if hook and hook.Remove then hook.Remove("PostDrawOpaqueRenderables", BATCH_HOOK_NAME) end
 
@@ -55,8 +56,8 @@ end
 
 local function destroyBatch(batch)
     for index = 1, #batch.meshes do
-        local mesh = batch.meshes[index]
-        if mesh and mesh.Destroy then mesh:Destroy() end
+        local drawing = batch.meshes[index]
+        if drawing.mesh and drawing.mesh.Destroy then drawing.mesh:Destroy() end
     end
 end
 
@@ -66,6 +67,8 @@ function Visuals.ClearDebrisBatches()
         debrisBatches[index] = nil
     end
     activeBatchPieces = 0
+    if IsValid(lightingProbe) then lightingProbe:Remove() end
+    lightingProbe = nil
 end
 
 function Visuals.SetDebrisStaticBatching(enabled)
@@ -98,48 +101,76 @@ local function sourceMeshes(modelPath, stats)
     return meshes
 end
 
-local function transformBatchVertex(vertex, piece, bounds)
-    local position = Vector(vertex.pos.x * piece.scale, vertex.pos.y * piece.scale, vertex.pos.z * piece.scale)
-    position:Rotate(piece.angles)
-    position:Add(piece.position)
-    if not bounds.mins then
-        bounds.mins = Vector(position.x, position.y, position.z)
-        bounds.maxs = Vector(position.x, position.y, position.z)
-    else
-        bounds.mins.x = math.min(bounds.mins.x, position.x)
-        bounds.mins.y = math.min(bounds.mins.y, position.y)
-        bounds.mins.z = math.min(bounds.mins.z, position.z)
-        bounds.maxs.x = math.max(bounds.maxs.x, position.x)
-        bounds.maxs.y = math.max(bounds.maxs.y, position.y)
-        bounds.maxs.z = math.max(bounds.maxs.z, position.z)
-    end
+local function recordBatchTiming(stats, startedAt, transformTime, buildTime)
+    if not stats then return end
+    local totalTime = profileClock() - startedAt
+    stats.transformTime = stats.transformTime + transformTime
+    stats.maxTransformTime = math.max(stats.maxTransformTime, transformTime)
+    stats.buildTime = stats.buildTime + buildTime
+    stats.maxBuildTime = math.max(stats.maxBuildTime, buildTime)
+    stats.totalTime = stats.totalTime + totalTime
+    stats.maxTotalTime = math.max(stats.maxTotalTime, totalTime)
+end
 
-    local normal = vertex.normal and Vector(vertex.normal.x, vertex.normal.y, vertex.normal.z) or vector_up
-    normal:Rotate(piece.angles)
-    return {
-        pos = position,
-        normal = normal,
-        u = vertex.u or 0,
-        v = vertex.v or 0,
-        color = vertex.color,
-    }
+local function destroyBuiltMeshes(built)
+    for index = 1, #built do
+        local drawing = built[index]
+        if drawing.mesh and drawing.mesh.Destroy then drawing.mesh:Destroy() end
+    end
+end
+
+local function appendBatchSource(group, piece, triangles)
+    local vertexCount = #triangles
+    if vertexCount == 0 or vertexCount % 3 ~= 0 then return false end
+
+    local firstVertex = 1
+    while firstVertex <= vertexCount do
+        local chunk = group.chunks[#group.chunks]
+        local capacity = MAX_BATCH_VERTICES - chunk.vertexCount
+        if capacity < 3 then
+            chunk = {entries = {}, vertexCount = 0}
+            group.chunks[#group.chunks + 1] = chunk
+            capacity = MAX_BATCH_VERTICES
+        end
+
+        local take = math.min(vertexCount - firstVertex + 1, capacity)
+        take = take - take % 3
+        if take == 0 then return false end
+        chunk.entries[#chunk.entries + 1] = {
+            piece = piece,
+            triangles = triangles,
+            firstVertex = firstVertex,
+            lastVertex = firstVertex + take - 1,
+        }
+        chunk.vertexCount = chunk.vertexCount + take
+        firstVertex = firstVertex + take
+    end
+    return true
 end
 
 local function buildStaticBatch(pieces, lifetime, shadows)
-    if #pieces == 0 or not Mesh or not util.GetModelMeshes then return false end
+    if #pieces == 0 or not Mesh or not mesh or not mesh.Begin or not util.GetModelMeshes then return false end
     local stats = batchStats()
-    local startedAt = stats and profileClock()
+    local totalStartedAt = stats and profileClock()
+    local transformTime = 0
+    local buildTime = 0
     local groups = {}
     local groupOrder = {}
     local bounds = {}
 
+    local function fail(built)
+        if built then destroyBuiltMeshes(built) end
+        if stats then
+            stats.failures = stats.failures + 1
+            recordBatchTiming(stats, totalStartedAt, transformTime, buildTime)
+        end
+        return false
+    end
+
     for pieceIndex = 1, #pieces do
         local piece = pieces[pieceIndex]
         local sources = sourceMeshes(piece.modelPath, stats)
-        if not sources then
-            if stats then stats.failures = stats.failures + 1 end
-            return false
-        end
+        if not sources then return fail() end
 
         for sourceIndex = 1, #sources do
             local source = sources[sourceIndex]
@@ -147,56 +178,98 @@ local function buildStaticBatch(pieces, lifetime, shadows)
             if materialName and source.triangles then
                 local group = groups[materialName]
                 if not group then
-                    group = {material = Material(materialName), chunks = {{}}, vertexCount = 0}
+                    local material = Material(materialName)
+                    if not material or material.IsError and material:IsError() then return fail() end
+                    group = {
+                        material = material,
+                        chunks = {{entries = {}, vertexCount = 0}},
+                    }
                     groups[materialName] = group
                     groupOrder[#groupOrder + 1] = group
                 end
-
-                local chunk = group.chunks[#group.chunks]
-                for vertexIndex = 1, #source.triangles do
-                    if #chunk >= MAX_BATCH_VERTICES then
-                        chunk = {}
-                        group.chunks[#group.chunks + 1] = chunk
-                    end
-                    chunk[#chunk + 1] = transformBatchVertex(source.triangles[vertexIndex], piece, bounds)
-                    group.vertexCount = group.vertexCount + 1
-                end
+                if not appendBatchSource(group, piece, source.triangles) then return fail() end
             end
         end
     end
 
-    if stats then recordDuration(stats, "transformTime", startedAt) end
     local built = {}
     local vertices = 0
-    local buildStartedAt = stats and profileClock()
+    local position = Vector()
+    local normal = Vector()
+
     for groupIndex = 1, #groupOrder do
         local group = groupOrder[groupIndex]
         for chunkIndex = 1, #group.chunks do
-            local triangles = group.chunks[chunkIndex]
-            if #triangles > 0 then
-                local mesh = Mesh(group.material)
-                if not mesh then
-                    for index = 1, #built do built[index]:Destroy() end
-                    if stats then stats.failures = stats.failures + 1 end
-                    return false
-                end
-                local ok = pcall(mesh.BuildFromTriangles, mesh, triangles)
+            local chunk = group.chunks[chunkIndex]
+            if chunk.vertexCount > 0 then
+                local drawing
+                local meshBegun = false
+                local ok = pcall(function()
+                    local buildStartedAt = stats and profileClock()
+                    drawing = {mesh = Mesh(group.material), material = group.material}
+                    if not drawing.mesh then error("failed to create IMesh") end
+                    mesh.Begin(drawing.mesh, MATERIAL_TRIANGLES, chunk.vertexCount / 3)
+                    meshBegun = true
+                    if stats then buildTime = buildTime + profileClock() - buildStartedAt end
+
+                    local transformStartedAt = stats and profileClock()
+                    for entryIndex = 1, #chunk.entries do
+                        local entry = chunk.entries[entryIndex]
+                        local piece = entry.piece
+                        for vertexIndex = entry.firstVertex, entry.lastVertex do
+                            local vertex = entry.triangles[vertexIndex]
+                            position.x = vertex.pos.x * piece.scale
+                            position.y = vertex.pos.y * piece.scale
+                            position.z = vertex.pos.z * piece.scale
+                            position:Rotate(piece.angles)
+                            position:Add(piece.position)
+
+                            local sourceNormal = vertex.normal or vector_up
+                            normal.x = sourceNormal.x
+                            normal.y = sourceNormal.y
+                            normal.z = sourceNormal.z
+                            normal:Rotate(piece.angles)
+
+                            if not bounds.mins then
+                                bounds.mins = Vector(position.x, position.y, position.z)
+                                bounds.maxs = Vector(position.x, position.y, position.z)
+                            else
+                                bounds.mins.x = math.min(bounds.mins.x, position.x)
+                                bounds.mins.y = math.min(bounds.mins.y, position.y)
+                                bounds.mins.z = math.min(bounds.mins.z, position.z)
+                                bounds.maxs.x = math.max(bounds.maxs.x, position.x)
+                                bounds.maxs.y = math.max(bounds.maxs.y, position.y)
+                                bounds.maxs.z = math.max(bounds.maxs.z, position.z)
+                            end
+
+                            local color = vertex.color or color_white
+                            mesh.Position(position)
+                            mesh.Normal(normal)
+                            mesh.TexCoord(0, vertex.u or 0, vertex.v or 0)
+                            mesh.Color(color.r or 255, color.g or 255, color.b or 255, color.a or 255)
+                            mesh.AdvanceVertex()
+                        end
+                    end
+                    if stats then transformTime = transformTime + profileClock() - transformStartedAt end
+
+                    buildStartedAt = stats and profileClock()
+                    mesh.End()
+                    meshBegun = false
+                    if stats then buildTime = buildTime + profileClock() - buildStartedAt end
+                end)
+
+                if meshBegun then pcall(mesh.End) end
                 if not ok then
-                    mesh:Destroy()
-                    for index = 1, #built do built[index]:Destroy() end
-                    if stats then stats.failures = stats.failures + 1 end
-                    return false
+                    if drawing and drawing.mesh and drawing.mesh.Destroy then drawing.mesh:Destroy() end
+                    return fail(built)
                 end
-                built[#built + 1] = mesh
-                vertices = vertices + #triangles
+                built[#built + 1] = drawing
+                vertices = vertices + chunk.vertexCount
             end
         end
     end
 
-    if #built == 0 then
-        if stats then stats.failures = stats.failures + 1 end
-        return false
-    end
+    if #built == 0 or not bounds.mins then return fail(built) end
 
     local center = vector_origin
     for index = 1, #pieces do center = center + pieces[index].position end
@@ -212,7 +285,7 @@ local function buildStaticBatch(pieces, lifetime, shadows)
     }
     activeBatchPieces = activeBatchPieces + #pieces
     if stats then
-        recordDuration(stats, "buildTime", buildStartedAt)
+        recordBatchTiming(stats, totalStartedAt, transformTime, buildTime)
         stats.created = stats.created + 1
         stats.pieces = stats.pieces + #pieces
         stats.meshes = stats.meshes + #built
@@ -220,6 +293,30 @@ local function buildStaticBatch(pieces, lifetime, shadows)
         if shadows then stats.shadowedPieces = stats.shadowedPieces + #pieces end
     end
     return true
+end
+
+local function establishBatchLighting(position)
+    if not IsValid(lightingProbe) then
+        lightingProbe = ClientsideModel(Visuals.RockDebrisModels[1], RENDERGROUP_OPAQUE)
+        if IsValid(lightingProbe) then
+            lightingProbe:SetNoDraw(true)
+            lightingProbe:DestroyShadow()
+            lightingProbe:DrawShadow(false)
+        end
+    end
+
+    if IsValid(lightingProbe) then
+        lightingProbe:SetPos(position)
+        if lightingProbe.SetRenderOrigin then lightingProbe:SetRenderOrigin(position) end
+        render.SetBlend(0)
+        lightingProbe:DrawModel()
+        return
+    end
+
+    if render.GetLightColor and render.ResetModelLighting then
+        local light = render.GetLightColor(position)
+        render.ResetModelLighting(light.x, light.y, light.z)
+    end
 end
 
 if hook and hook.Add then
@@ -242,8 +339,13 @@ if hook and hook.Add then
                 if stats then stats.expired = stats.expired + 1 end
             elseif renderEnabled then
                 if not util.IsBoxVisible or util.IsBoxVisible(batch.mins, batch.maxs) then
+                    establishBatchLighting(batch.center)
                     render.SetBlend(math.min(remaining, 1))
-                    for meshIndex = 1, #batch.meshes do batch.meshes[meshIndex]:Draw() end
+                    for meshIndex = 1, #batch.meshes do
+                        local drawing = batch.meshes[meshIndex]
+                        render.SetMaterial(drawing.material)
+                        drawing.mesh:Draw()
+                    end
                     render.SetBlend(1)
                     if stats then
                         stats.drawCalls = stats.drawCalls + #batch.meshes
@@ -783,7 +885,8 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
             local propPosition = options.propAtOrigin and position or currentPosition
             local propAngle = (propPosition - normal * 70 + sourceDirection):GetNormalized():Angle()
             if profiling then recordDuration(impactStats, "placementMathTime", placementMathStartedAt) end
-            local legacyInitialization = profiling and Profile.TakeInitializationCohort() or nil
+            local legacyInitialization
+            if profiling then legacyInitialization = Profile.TakeInitializationCohort() end
             local comparing = legacyInitialization ~= nil
             local comparisonStartedAt = comparing and profileClock()
             local modelSelectStartedAt = profiling and profileClock()

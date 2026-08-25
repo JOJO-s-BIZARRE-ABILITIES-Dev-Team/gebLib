@@ -91,7 +91,9 @@ local function createDebrisProfile(Visuals, getDebris)
                 created = 0, expired = 0, failures = 0, fallbackPieces = 0,
                 pieces = 0, meshes = 0, vertices = 0, shadowedPieces = 0,
                 cacheHits = 0, cacheMisses = 0, sourceTime = 0,
-                transformTime = 0, buildTime = 0,
+                transformTime = 0, maxTransformTime = 0,
+                buildTime = 0, maxBuildTime = 0,
+                totalTime = 0, maxTotalTime = 0,
                 renderHooks = 0, drawnBatches = 0, culledBatches = 0, drawCalls = 0,
                 drawTime = 0, maxDrawTime = 0,
             },
@@ -644,7 +646,11 @@ local function createDebrisProfile(Visuals, getDebris)
                     .. " meshes, " .. batching.vertices .. " vertices, " .. batching.shadowedPieces
                     .. " pieces requested shadows; source " .. milliseconds(batching.sourceTime)
                     .. ", transform " .. milliseconds(batching.transformTime)
+                    .. " total, " .. milliseconds(batching.maxTransformTime) .. " maximum"
                     .. ", build " .. milliseconds(batching.buildTime)
+                    .. " total, " .. milliseconds(batching.maxBuildTime) .. " maximum"
+                    .. ", full path " .. milliseconds(batching.totalTime)
+                    .. " total, " .. milliseconds(batching.maxTotalTime) .. " maximum"
             )
             profilePrint(
                 "static batch cache/draw: " .. batching.cacheHits .. " hits, "
