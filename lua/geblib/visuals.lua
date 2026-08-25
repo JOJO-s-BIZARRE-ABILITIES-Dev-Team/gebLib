@@ -41,11 +41,20 @@ local profileClock
 local recordDuration
 local BATCH_HOOK_NAME = "gebLib.Visuals.DebrisBatches"
 local MAX_BATCH_VERTICES = 60000
+local BATCH_LIGHTING_INTERVAL = 0.25
+local BATCH_LIGHTING_DIRECTIONS = {
+    {BOX_FRONT, Vector(1, 0, 0)},
+    {BOX_BACK, Vector(-1, 0, 0)},
+    {BOX_RIGHT, Vector(0, -1, 0)},
+    {BOX_LEFT, Vector(0, 1, 0)},
+    {BOX_TOP, Vector(0, 0, 1)},
+    {BOX_BOTTOM, Vector(0, 0, -1)},
+}
 local debrisBatches = {}
 local activeBatchPieces = 0
 local modelMeshCache = {}
-local staticBatchingEnabled = false
-local lightingProbe
+Visuals.StaticBatchingDefault = Visuals.StaticBatchingDefault ~= false
+local staticBatchingEnabled = Visuals.StaticBatchingDefault
 
 if hook and hook.Remove then hook.Remove("PostDrawOpaqueRenderables", BATCH_HOOK_NAME) end
 
@@ -67,15 +76,11 @@ function Visuals.ClearDebrisBatches()
         debrisBatches[index] = nil
     end
     activeBatchPieces = 0
-    if IsValid(lightingProbe) then lightingProbe:Remove() end
-    lightingProbe = nil
 end
 
 function Visuals.SetDebrisStaticBatching(enabled)
-    enabled = enabled == true
-    if enabled and (not gebLib.DebugMode or not gebLib.DebugMode()) then return false end
-    staticBatchingEnabled = enabled
-    return enabled
+    staticBatchingEnabled = enabled == true
+    return staticBatchingEnabled
 end
 
 function Visuals.GetDebrisBatchState()
@@ -295,27 +300,26 @@ local function buildStaticBatch(pieces, lifetime, shadows)
     return true
 end
 
-local function establishBatchLighting(position)
-    if not IsValid(lightingProbe) then
-        lightingProbe = ClientsideModel(Visuals.RockDebrisModels[1], RENDERGROUP_OPAQUE)
-        if IsValid(lightingProbe) then
-            lightingProbe:SetNoDraw(true)
-            lightingProbe:DestroyShadow()
-            lightingProbe:DrawShadow(false)
+local function establishBatchLighting(batch, now, stats)
+    if not batch.lighting or now >= (batch.nextLightingAt or 0) then
+        local startedAt = stats and profileClock()
+        local lighting = batch.lighting or {}
+        for index = 1, #BATCH_LIGHTING_DIRECTIONS do
+            lighting[index] = render.ComputeLighting(batch.center, BATCH_LIGHTING_DIRECTIONS[index][2])
+        end
+        batch.lighting = lighting
+        batch.nextLightingAt = now + BATCH_LIGHTING_INTERVAL
+        if stats then
+            local elapsed = recordDuration(stats, "lightingTime", startedAt)
+            stats.lightingSamples = stats.lightingSamples + 1
+            stats.maxLightingTime = math.max(stats.maxLightingTime, elapsed)
         end
     end
 
-    if IsValid(lightingProbe) then
-        lightingProbe:SetPos(position)
-        if lightingProbe.SetRenderOrigin then lightingProbe:SetRenderOrigin(position) end
-        render.SetBlend(0)
-        lightingProbe:DrawModel()
-        return
-    end
-
-    if render.GetLightColor and render.ResetModelLighting then
-        local light = render.GetLightColor(position)
-        render.ResetModelLighting(light.x, light.y, light.z)
+    render.ResetModelLighting(0, 0, 0)
+    for index = 1, #BATCH_LIGHTING_DIRECTIONS do
+        local color = batch.lighting[index]
+        render.SetModelLighting(BATCH_LIGHTING_DIRECTIONS[index][1], color.x, color.y, color.z)
     end
 end
 
@@ -339,7 +343,7 @@ if hook and hook.Add then
                 if stats then stats.expired = stats.expired + 1 end
             elseif renderEnabled then
                 if not util.IsBoxVisible or util.IsBoxVisible(batch.mins, batch.maxs) then
-                    establishBatchLighting(batch.center)
+                    establishBatchLighting(batch, now, stats)
                     render.SetBlend(math.min(remaining, 1))
                     for meshIndex = 1, #batch.meshes do
                         local drawing = batch.meshes[meshIndex]

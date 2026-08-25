@@ -94,6 +94,7 @@ local function createDebrisProfile(Visuals, getDebris)
                 transformTime = 0, maxTransformTime = 0,
                 buildTime = 0, maxBuildTime = 0,
                 totalTime = 0, maxTotalTime = 0,
+                lightingSamples = 0, lightingTime = 0, maxLightingTime = 0,
                 renderHooks = 0, drawnBatches = 0, culledBatches = 0, drawCalls = 0,
                 drawTime = 0, maxDrawTime = 0,
             },
@@ -272,7 +273,9 @@ local function createDebrisProfile(Visuals, getDebris)
         if Visuals.SetDebrisRenderEnabled then Visuals.SetDebrisRenderEnabled(true) end
         if Visuals.SetDebrisPhysicsEnabled then Visuals.SetDebrisPhysicsEnabled(true) end
         if Visuals.SetDebrisPhysicsRetirement then Visuals.SetDebrisPhysicsRetirement(true) end
-        if Visuals.SetDebrisStaticBatching then Visuals.SetDebrisStaticBatching(false) end
+        if Visuals.SetDebrisStaticBatching then
+            Visuals.SetDebrisStaticBatching(Visuals.StaticBatchingDefault ~= false)
+        end
     end
 
     function Profile.SetActive(enabled)
@@ -658,7 +661,10 @@ local function createDebrisProfile(Visuals, getDebris)
                     .. " batch draws, " .. batching.culledBatches .. " culled, "
                     .. batching.drawCalls .. " mesh draws, "
                     .. milliseconds(batching.drawTime / math.max(batching.renderHooks, 1))
-                    .. " per render hook, " .. milliseconds(batching.maxDrawTime) .. " maximum"
+                    .. " per render hook, " .. milliseconds(batching.maxDrawTime) .. " maximum; lighting "
+                    .. batching.lightingSamples .. " samples, "
+                    .. milliseconds(batching.lightingTime / math.max(batching.lightingSamples, 1))
+                    .. " average, " .. milliseconds(batching.maxLightingTime) .. " maximum"
             )
         end
 
