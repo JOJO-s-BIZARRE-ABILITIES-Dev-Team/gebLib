@@ -3,7 +3,6 @@
 	"$basetexture" "geblib/particles/debris_smoke"
 	"$vertexcolor" "1"
 	"$blendframes" "1"
-	"$depthblend" "1"
 	"$alpha" "0.5"
 	"$minfadesize" "0.6"
 }
