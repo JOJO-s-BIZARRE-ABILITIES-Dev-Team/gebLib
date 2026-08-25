@@ -1,10 +1,16 @@
 local function createVisualRuntime(Visuals)
     local DebrisRuntime = {}
     local TIMER_NAME = "gebLib.Visuals.Debris"
+    local PHYSICS_TIMER_NAME = "gebLib.Visuals.DebrisPhysics"
     local GROW_TIME = 0.25
+    local PHYSICS_SCAN_INTERVAL = 0.25
+    local PHYSICS_SCAN_BUDGET = 256
+    local PHYSICS_MIN_AGE = 0.5
+    local SLEEP_CONFIRMATIONS = 2
     local profile
 
     timer.Remove(TIMER_NAME)
+    timer.Remove(PHYSICS_TIMER_NAME)
 
     if Visuals.ActiveDebris then
         local oldDebris = {}
@@ -16,10 +22,15 @@ local function createVisualRuntime(Visuals)
     end
 
     local heap = {}
+    local physicalDebris = {}
+    local physicsScanIndex = 1
+    local physicsTimerRunning = false
     local scheduledAt
     Visuals.ActiveDebris = heap
     Visuals.MaxDebris = Visuals.MaxDebris or 512
+    Visuals.RetireSettledPhysics = Visuals.RetireSettledPhysics ~= false
     DebrisRuntime.Heap = heap
+    DebrisRuntime.PhysicalDebris = physicalDebris
 
     function DebrisRuntime.SetProfile(current)
         profile = current
@@ -33,6 +44,131 @@ local function createVisualRuntime(Visuals)
     local function finishDuration(stats, key, startedAt)
         if not stats then return 0 end
         return profile.RecordDuration(stats, key, startedAt)
+    end
+
+    local function retirementStats()
+        return profileData("retirement")
+    end
+
+    local function removePhysicalAt(index)
+        local count = #physicalDebris
+        local entity = physicalDebris[index]
+        if not entity then return end
+
+        local last = physicalDebris[count]
+        physicalDebris[count] = nil
+        entity.gebLib_DebrisPhysicsIndex = nil
+        entity.gebLib_DebrisSleepChecks = nil
+        if index < count then
+            physicalDebris[index] = last
+            last.gebLib_DebrisPhysicsIndex = index
+        end
+        if physicsScanIndex > #physicalDebris then physicsScanIndex = 1 end
+        return entity
+    end
+
+    local function unregisterPhysical(entity)
+        local index = entity and entity.gebLib_DebrisPhysicsIndex
+        if index then removePhysicalAt(index) end
+    end
+
+    local scanPhysics
+
+    local function updatePhysicsTimer()
+        if Visuals.RetireSettledPhysics and Visuals.DebrisPhysicsEnabled ~= false and #physicalDebris > 0 then
+            if not physicsTimerRunning then
+                physicsTimerRunning = true
+                timer.Create(PHYSICS_TIMER_NAME, PHYSICS_SCAN_INTERVAL, 0, scanPhysics)
+            end
+        else
+            timer.Remove(PHYSICS_TIMER_NAME)
+            physicsTimerRunning = false
+        end
+    end
+
+    local function applyPhysicsDiagnostic(entity)
+        if Visuals.DebrisPhysicsEnabled ~= false or not IsValid(entity) then return end
+        local physics = entity:GetPhysicsObject()
+        if not IsValid(physics) then return end
+        if entity.gebLib_DebrisMotionWasEnabled == nil then
+            entity.gebLib_DebrisMotionWasEnabled = not physics.IsMotionEnabled or physics:IsMotionEnabled()
+        end
+        if physics.EnableMotion then physics:EnableMotion(false) end
+        if physics.Sleep then physics:Sleep() end
+    end
+
+    local function registerPhysical(entity)
+        if entity.gebLib_DebrisPhysicsIndex then return end
+        local index = #physicalDebris + 1
+        physicalDebris[index] = entity
+        entity.gebLib_DebrisPhysicsIndex = index
+        entity.gebLib_DebrisPhysicsCreatedAt = CurTime()
+        entity.gebLib_DebrisSleepChecks = 0
+        local stats = retirementStats()
+        if stats then stats.peakTracked = math.max(stats.peakTracked, index) end
+        applyPhysicsDiagnostic(entity)
+        updatePhysicsTimer()
+    end
+
+    scanPhysics = function()
+        if not Visuals.RetireSettledPhysics or Visuals.DebrisPhysicsEnabled == false then
+            updatePhysicsTimer()
+            return
+        end
+
+        local stats = retirementStats()
+        local startedAt = stats and profile.Now()
+        if stats then stats.scans = stats.scans + 1 end
+        local checked = 0
+        local scanLimit = math.min(PHYSICS_SCAN_BUDGET, #physicalDebris)
+        local now = CurTime()
+
+        while checked < scanLimit and #physicalDebris > 0 do
+            if physicsScanIndex > #physicalDebris then physicsScanIndex = 1 end
+            local entity = physicalDebris[physicsScanIndex]
+            checked = checked + 1
+
+            if not IsValid(entity) then
+                removePhysicalAt(physicsScanIndex)
+                if stats then stats.invalid = stats.invalid + 1 end
+            else
+                local physics = entity:GetPhysicsObject()
+                if not IsValid(physics) then
+                    removePhysicalAt(physicsScanIndex)
+                    if stats then stats.missing = stats.missing + 1 end
+                elseif now - (entity.gebLib_DebrisPhysicsCreatedAt or now) < PHYSICS_MIN_AGE then
+                    physicsScanIndex = physicsScanIndex + 1
+                elseif physics.IsAsleep and physics:IsAsleep() then
+                    entity.gebLib_DebrisSleepChecks = (entity.gebLib_DebrisSleepChecks or 0) + 1
+                    if stats then stats.sleepingChecks = stats.sleepingChecks + 1 end
+                    if entity.gebLib_DebrisSleepChecks >= SLEEP_CONFIRMATIONS then
+                        entity:PhysicsDestroy()
+                        if not IsValid(entity:GetPhysicsObject()) then
+                            entity.gebLib_DebrisRetiredPhysics = true
+                            removePhysicalAt(physicsScanIndex)
+                            if stats then stats.retired = stats.retired + 1 end
+                        else
+                            entity.gebLib_DebrisSleepChecks = 0
+                            physicsScanIndex = physicsScanIndex + 1
+                            if stats then stats.failures = stats.failures + 1 end
+                        end
+                    else
+                        physicsScanIndex = physicsScanIndex + 1
+                    end
+                else
+                    entity.gebLib_DebrisSleepChecks = 0
+                    physicsScanIndex = physicsScanIndex + 1
+                    if stats then stats.awakeChecks = stats.awakeChecks + 1 end
+                end
+            end
+        end
+
+        if stats then
+            stats.checks = stats.checks + checked
+            stats.tracked = #physicalDebris
+            finishDuration(stats, "scanTime", startedAt)
+        end
+        updatePhysicsTimer()
     end
 
     local function eventAt(entity)
@@ -171,6 +307,7 @@ local function createVisualRuntime(Visuals)
 
     local function removed(entity)
         local index = entity.gebLib_DebrisHeapIndex
+        unregisterPhysical(entity)
         if not index then return end
         local lifecycle = profileData("lifecycle")
         local startedAt = lifecycle and profile.Now()
@@ -288,6 +425,11 @@ local function createVisualRuntime(Visuals)
         local heapStartedAt = stats and profile.Now()
         local previousFirst = heap[1]
         push(entity)
+        if clientProp then registerPhysical(entity) end
+        if Visuals.DebrisRenderEnabled == false and entity.SetNoDraw then
+            entity.gebLib_DebrisNoDrawWas = entity.GetNoDraw and entity:GetNoDraw() or false
+            entity:SetNoDraw(true)
+        end
         if stats then finishDuration(stats, "heapTime", heapStartedAt) end
         if stats then
             stats.peakActive = math.max(stats.peakActive, #heap)
@@ -303,6 +445,72 @@ local function createVisualRuntime(Visuals)
         return entity
     end
 
+    function Visuals.RefreshDebrisPhysics(entity)
+        if IsValid(entity) and entity.gebLib_DebrisPhysicsIndex then applyPhysicsDiagnostic(entity) end
+    end
+
+    function Visuals.SetDebrisPhysicsRetirement(enabled)
+        Visuals.RetireSettledPhysics = enabled == true
+        updatePhysicsTimer()
+        return Visuals.RetireSettledPhysics
+    end
+
+    function Visuals.SetDebrisRenderEnabled(enabled)
+        enabled = enabled ~= false
+        Visuals.DebrisRenderEnabled = enabled
+        for index = 1, #heap do
+            local entity = heap[index]
+            if IsValid(entity) and entity.SetNoDraw then
+                if enabled then
+                    if entity.gebLib_DebrisNoDrawWas ~= nil then
+                        entity:SetNoDraw(entity.gebLib_DebrisNoDrawWas)
+                        entity.gebLib_DebrisNoDrawWas = nil
+                    end
+                elseif entity.gebLib_DebrisNoDrawWas == nil then
+                    entity.gebLib_DebrisNoDrawWas = entity.GetNoDraw and entity:GetNoDraw() or false
+                    entity:SetNoDraw(true)
+                end
+            end
+        end
+        return enabled
+    end
+
+    function Visuals.SetDebrisPhysicsEnabled(enabled)
+        enabled = enabled ~= false
+        if Visuals.DebrisPhysicsEnabled == enabled then return enabled end
+        Visuals.DebrisPhysicsEnabled = enabled
+
+        for index = 1, #physicalDebris do
+            local entity = physicalDebris[index]
+            if IsValid(entity) then
+                local physics = entity:GetPhysicsObject()
+                if IsValid(physics) then
+                    if enabled then
+                        local wasEnabled = entity.gebLib_DebrisMotionWasEnabled
+                        entity.gebLib_DebrisMotionWasEnabled = nil
+                        if wasEnabled and physics.EnableMotion then
+                            physics:EnableMotion(true)
+                            if physics.Wake then physics:Wake() end
+                        end
+                    else
+                        applyPhysicsDiagnostic(entity)
+                    end
+                end
+            end
+        end
+        updatePhysicsTimer()
+        return enabled
+    end
+
+    function Visuals.GetDebrisRuntimeState()
+        return {
+            retirement = Visuals.RetireSettledPhysics,
+            render = Visuals.DebrisRenderEnabled ~= false,
+            physics = Visuals.DebrisPhysicsEnabled ~= false,
+            trackedPhysics = #physicalDebris,
+        }
+    end
+
     function Visuals.RemoveDebris(entity)
         local lifecycle = profileData("lifecycle")
         if lifecycle then lifecycle.manualRemovals = lifecycle.manualRemovals + 1 end
@@ -311,7 +519,8 @@ local function createVisualRuntime(Visuals)
     end
 
     function Visuals.GetDebrisCount()
-        return #heap
+        local batchState = Visuals.GetDebrisBatchState and Visuals.GetDebrisBatchState()
+        return #heap + (batchState and batchState.pieces or 0)
     end
 
     function Visuals.ClearDebris()
@@ -321,7 +530,10 @@ local function createVisualRuntime(Visuals)
             lifecycle.cleared = lifecycle.cleared + #heap
         end
         timer.Remove(TIMER_NAME)
+        timer.Remove(PHYSICS_TIMER_NAME)
+        physicsTimerRunning = false
         scheduledAt = nil
+        physicsScanIndex = 1
 
         for index = #heap, 1, -1 do
             local entity = heap[index]
@@ -330,9 +542,15 @@ local function createVisualRuntime(Visuals)
             entity.gebLib_DebrisEventAt = nil
             entity.gebLib_DebrisExpiresAt = nil
             entity.gebLib_DebrisFadePending = nil
+            entity.gebLib_DebrisPhysicsIndex = nil
+            entity.gebLib_DebrisSleepChecks = nil
+            entity.gebLib_DebrisMotionWasEnabled = nil
+            entity.gebLib_DebrisNoDrawWas = nil
             entity.RenderOverride = nil
             if IsValid(entity) then entity:Remove() end
         end
+        for index = #physicalDebris, 1, -1 do physicalDebris[index] = nil end
+        if Visuals.ClearDebrisBatches then Visuals.ClearDebrisBatches() end
     end
 
     return DebrisRuntime

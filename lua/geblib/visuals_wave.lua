@@ -315,6 +315,7 @@ local function spawnDebrisWaveStep(wave, step)
                 recordDuration(stats, "propPhysicsTime", physicsStartedAt)
                 recordDuration(stats, "propSetupTime", propSetupStartedAt)
             end
+            Visuals.RefreshDebrisPhysics(prop)
 
             wave.Spawned = wave.Spawned + 1
             if not waveCallback(propConfig.setup, wave, "prop setup callback", prop, step) then

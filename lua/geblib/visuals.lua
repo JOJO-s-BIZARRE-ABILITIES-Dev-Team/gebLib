@@ -34,15 +34,243 @@ local impactModelTraceData = {
 
 Visuals.RockDebrisModels = Surface.RockModels
 
+if Visuals.ClearDebrisBatches then Visuals.ClearDebrisBatches() end
+
+local Profile
+local profileClock
+local recordDuration
+local BATCH_HOOK_NAME = "gebLib.Visuals.DebrisBatches"
+local MAX_BATCH_VERTICES = 60000
+local debrisBatches = {}
+local activeBatchPieces = 0
+local modelMeshCache = {}
+local staticBatchingEnabled = false
+
+if hook and hook.Remove then hook.Remove("PostDrawOpaqueRenderables", BATCH_HOOK_NAME) end
+
+local function batchStats()
+    if not Profile or not Profile.IsActive() then return end
+    return Profile.Data().batching
+end
+
+local function destroyBatch(batch)
+    for index = 1, #batch.meshes do
+        local mesh = batch.meshes[index]
+        if mesh and mesh.Destroy then mesh:Destroy() end
+    end
+end
+
+function Visuals.ClearDebrisBatches()
+    for index = #debrisBatches, 1, -1 do
+        destroyBatch(debrisBatches[index])
+        debrisBatches[index] = nil
+    end
+    activeBatchPieces = 0
+end
+
+function Visuals.SetDebrisStaticBatching(enabled)
+    enabled = enabled == true
+    if enabled and (not gebLib.DebugMode or not gebLib.DebugMode()) then return false end
+    staticBatchingEnabled = enabled
+    return enabled
+end
+
+function Visuals.GetDebrisBatchState()
+    return {
+        enabled = staticBatchingEnabled,
+        batches = #debrisBatches,
+        pieces = activeBatchPieces,
+    }
+end
+
+local function sourceMeshes(modelPath, stats)
+    local cached = modelMeshCache[modelPath]
+    if cached ~= nil then
+        if stats then stats.cacheHits = stats.cacheHits + 1 end
+        return cached or nil
+    end
+
+    if stats then stats.cacheMisses = stats.cacheMisses + 1 end
+    local startedAt = stats and profileClock and profileClock()
+    local meshes = util.GetModelMeshes and util.GetModelMeshes(modelPath, 0)
+    modelMeshCache[modelPath] = meshes or false
+    if stats then recordDuration(stats, "sourceTime", startedAt) end
+    return meshes
+end
+
+local function transformBatchVertex(vertex, piece, bounds)
+    local position = Vector(vertex.pos.x * piece.scale, vertex.pos.y * piece.scale, vertex.pos.z * piece.scale)
+    position:Rotate(piece.angles)
+    position:Add(piece.position)
+    if not bounds.mins then
+        bounds.mins = Vector(position.x, position.y, position.z)
+        bounds.maxs = Vector(position.x, position.y, position.z)
+    else
+        bounds.mins.x = math.min(bounds.mins.x, position.x)
+        bounds.mins.y = math.min(bounds.mins.y, position.y)
+        bounds.mins.z = math.min(bounds.mins.z, position.z)
+        bounds.maxs.x = math.max(bounds.maxs.x, position.x)
+        bounds.maxs.y = math.max(bounds.maxs.y, position.y)
+        bounds.maxs.z = math.max(bounds.maxs.z, position.z)
+    end
+
+    local normal = vertex.normal and Vector(vertex.normal.x, vertex.normal.y, vertex.normal.z) or vector_up
+    normal:Rotate(piece.angles)
+    return {
+        pos = position,
+        normal = normal,
+        u = vertex.u or 0,
+        v = vertex.v or 0,
+        color = vertex.color,
+    }
+end
+
+local function buildStaticBatch(pieces, lifetime, shadows)
+    if #pieces == 0 or not Mesh or not util.GetModelMeshes then return false end
+    local stats = batchStats()
+    local startedAt = stats and profileClock()
+    local groups = {}
+    local groupOrder = {}
+    local bounds = {}
+
+    for pieceIndex = 1, #pieces do
+        local piece = pieces[pieceIndex]
+        local sources = sourceMeshes(piece.modelPath, stats)
+        if not sources then
+            if stats then stats.failures = stats.failures + 1 end
+            return false
+        end
+
+        for sourceIndex = 1, #sources do
+            local source = sources[sourceIndex]
+            local materialName = piece.material or source.material
+            if materialName and source.triangles then
+                local group = groups[materialName]
+                if not group then
+                    group = {material = Material(materialName), chunks = {{}}, vertexCount = 0}
+                    groups[materialName] = group
+                    groupOrder[#groupOrder + 1] = group
+                end
+
+                local chunk = group.chunks[#group.chunks]
+                for vertexIndex = 1, #source.triangles do
+                    if #chunk >= MAX_BATCH_VERTICES then
+                        chunk = {}
+                        group.chunks[#group.chunks + 1] = chunk
+                    end
+                    chunk[#chunk + 1] = transformBatchVertex(source.triangles[vertexIndex], piece, bounds)
+                    group.vertexCount = group.vertexCount + 1
+                end
+            end
+        end
+    end
+
+    if stats then recordDuration(stats, "transformTime", startedAt) end
+    local built = {}
+    local vertices = 0
+    local buildStartedAt = stats and profileClock()
+    for groupIndex = 1, #groupOrder do
+        local group = groupOrder[groupIndex]
+        for chunkIndex = 1, #group.chunks do
+            local triangles = group.chunks[chunkIndex]
+            if #triangles > 0 then
+                local mesh = Mesh(group.material)
+                if not mesh then
+                    for index = 1, #built do built[index]:Destroy() end
+                    if stats then stats.failures = stats.failures + 1 end
+                    return false
+                end
+                local ok = pcall(mesh.BuildFromTriangles, mesh, triangles)
+                if not ok then
+                    mesh:Destroy()
+                    for index = 1, #built do built[index]:Destroy() end
+                    if stats then stats.failures = stats.failures + 1 end
+                    return false
+                end
+                built[#built + 1] = mesh
+                vertices = vertices + #triangles
+            end
+        end
+    end
+
+    if #built == 0 then
+        if stats then stats.failures = stats.failures + 1 end
+        return false
+    end
+
+    local center = vector_origin
+    for index = 1, #pieces do center = center + pieces[index].position end
+    center = center / #pieces
+    debrisBatches[#debrisBatches + 1] = {
+        meshes = built,
+        center = center,
+        mins = bounds.mins,
+        maxs = bounds.maxs,
+        expiresAt = CurTime() + lifetime,
+        pieceCount = #pieces,
+        shadowsRequested = shadows,
+    }
+    activeBatchPieces = activeBatchPieces + #pieces
+    if stats then
+        recordDuration(stats, "buildTime", buildStartedAt)
+        stats.created = stats.created + 1
+        stats.pieces = stats.pieces + #pieces
+        stats.meshes = stats.meshes + #built
+        stats.vertices = stats.vertices + vertices
+        if shadows then stats.shadowedPieces = stats.shadowedPieces + #pieces end
+    end
+    return true
+end
+
+if hook and hook.Add then
+    hook.Add("PostDrawOpaqueRenderables", BATCH_HOOK_NAME, function(drawingDepth, drawingSkybox, drawing3DSkybox)
+        if drawingDepth or drawingSkybox or drawing3DSkybox then return end
+        local stats = batchStats()
+        local startedAt = stats and profileClock()
+        if stats then stats.renderHooks = stats.renderHooks + 1 end
+        local now = CurTime()
+        local renderEnabled = Visuals.DebrisRenderEnabled ~= false
+
+        for index = #debrisBatches, 1, -1 do
+            local batch = debrisBatches[index]
+            local remaining = batch.expiresAt - now
+            if remaining <= 0 then
+                destroyBatch(batch)
+                activeBatchPieces = activeBatchPieces - batch.pieceCount
+                debrisBatches[index] = debrisBatches[#debrisBatches]
+                debrisBatches[#debrisBatches] = nil
+                if stats then stats.expired = stats.expired + 1 end
+            elseif renderEnabled then
+                if not util.IsBoxVisible or util.IsBoxVisible(batch.mins, batch.maxs) then
+                    render.SetBlend(math.min(remaining, 1))
+                    for meshIndex = 1, #batch.meshes do batch.meshes[meshIndex]:Draw() end
+                    render.SetBlend(1)
+                    if stats then
+                        stats.drawCalls = stats.drawCalls + #batch.meshes
+                        stats.drawnBatches = stats.drawnBatches + 1
+                    end
+                elseif stats then
+                    stats.culledBatches = stats.culledBatches + 1
+                end
+            end
+        end
+
+        if stats then
+            local elapsed = recordDuration(stats, "drawTime", startedAt)
+            stats.maxDrawTime = math.max(stats.maxDrawTime, elapsed)
+        end
+    end)
+end
+
 local DebrisRuntime = loadInternal("geblib/visuals_runtime.lua")(Visuals)
 local debrisHeap = DebrisRuntime.Heap
 
-local Profile = loadInternal("geblib/visuals_profile.lua")(Visuals, function()
+Profile = loadInternal("geblib/visuals_profile.lua")(Visuals, function()
     return debrisHeap
 end)
 DebrisRuntime.SetProfile(Profile)
-local profileClock = Profile.Now
-local recordDuration = Profile.RecordDuration
+profileClock = Profile.Now
+recordDuration = Profile.RecordDuration
 local finishImpactProfile = Profile.FinishImpact
 loadInternal("geblib/visuals_wave.lua")(Visuals, Runtime, Surface, Config, Profile)
 
@@ -428,6 +656,7 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
     local preserveCount = options.preserveCount == true
     local physicsMaterial = impactPhysicsMaterial(materialType)
     local spawned = 0
+    local batchedModels = staticBatchingEnabled and {} or nil
     if profiling then recordDuration(impactStats, "preparationTime", preparationStartedAt) end
 
     local loopStartedAt = profiling and profileClock()
@@ -508,27 +737,38 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
                 end
 
                 if keep then
-                    local modelCreateStartedAt = profiling and profileClock()
-                    local entity = Visuals.CreateDebris(modelPath, false, staticLifetime, preserveCount, nil, false)
-                    if profiling then recordDuration(impactStats, "modelCreateTime", modelCreateStartedAt) end
+                    local modelAngles = faceDirection:Angle()
+                    if batchedModels then
+                        batchedModels[#batchedModels + 1] = {
+                            modelPath = modelPath,
+                            position = modelPosition,
+                            angles = modelAngles,
+                            scale = scale,
+                            material = surfaceMaterial,
+                        }
+                    else
+                        local modelCreateStartedAt = profiling and profileClock()
+                        local entity = Visuals.CreateDebris(modelPath, false, staticLifetime, preserveCount, nil, false)
+                        if profiling then recordDuration(impactStats, "modelCreateTime", modelCreateStartedAt) end
 
-                    if IsValid(entity) then
-                        local modelSetupStartedAt = profiling and profileClock()
-                        configureImpactModel(
-                            entity,
-                            modelPosition,
-                            faceDirection:Angle(),
-                            scale,
-                            surfaceMaterial,
-                            shadows,
-                            profiling and impactStats or nil,
-                            false
-                        )
-                        if profiling then
-                            recordDuration(impactStats, "modelSetupTime", modelSetupStartedAt)
-                            impactStats.modelsConfigured = impactStats.modelsConfigured + 1
+                        if IsValid(entity) then
+                            local modelSetupStartedAt = profiling and profileClock()
+                            configureImpactModel(
+                                entity,
+                                modelPosition,
+                                modelAngles,
+                                scale,
+                                surfaceMaterial,
+                                shadows,
+                                profiling and impactStats or nil,
+                                false
+                            )
+                            if profiling then
+                                recordDuration(impactStats, "modelSetupTime", modelSetupStartedAt)
+                                impactStats.modelsConfigured = impactStats.modelsConfigured + 1
+                            end
+                            spawned = spawned + 1
                         end
-                        spawned = spawned + 1
                     end
                 elseif profiling then
                     impactStats.placementRejected = impactStats.placementRejected + 1
@@ -616,11 +856,49 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
                         if IsValid(physics) then impactStats.abOptimizedPhysics = impactStats.abOptimizedPhysics + 1 end
                     end
                 end
+                Visuals.RefreshDebrisPhysics(entity)
                 spawned = spawned + 1
             end
         end
     end
     if profiling then recordDuration(impactStats, "loopTime", loopStartedAt) end
+
+    if batchedModels and #batchedModels > 0 then
+        local batchCallOk, batchBuilt = pcall(buildStaticBatch, batchedModels, staticLifetime, shadows)
+        if batchCallOk and batchBuilt then
+            spawned = spawned + #batchedModels
+        else
+            local stats = batchStats()
+            if stats then
+                if not batchCallOk then stats.failures = stats.failures + 1 end
+                stats.fallbackPieces = stats.fallbackPieces + #batchedModels
+            end
+            for index = 1, #batchedModels do
+                local piece = batchedModels[index]
+                local modelCreateStartedAt = profiling and profileClock()
+                local entity = Visuals.CreateDebris(piece.modelPath, false, staticLifetime, preserveCount, nil, false)
+                if profiling then recordDuration(impactStats, "modelCreateTime", modelCreateStartedAt) end
+                if IsValid(entity) then
+                    local modelSetupStartedAt = profiling and profileClock()
+                    configureImpactModel(
+                        entity,
+                        piece.position,
+                        piece.angles,
+                        piece.scale,
+                        piece.material,
+                        shadows,
+                        profiling and impactStats or nil,
+                        false
+                    )
+                    if profiling then
+                        recordDuration(impactStats, "modelSetupTime", modelSetupStartedAt)
+                        impactStats.modelsConfigured = impactStats.modelsConfigured + 1
+                    end
+                    spawned = spawned + 1
+                end
+            end
+        end
+    end
 
     if particleCount > 0 then
         local color = impactColor(materialType)

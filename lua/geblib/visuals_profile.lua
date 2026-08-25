@@ -81,6 +81,20 @@ local function createDebrisProfile(Visuals, getDebris)
                 manualRemovals = 0, clearCalls = 0, cleared = 0,
                 fadeDrawCalls = 0, fadeDrawTime = 0, maxFadeDrawTime = 0,
             },
+            retirement = {
+                tracked = 0, peakTracked = 0,
+                scans = 0, scanTime = 0, checks = 0,
+                awakeChecks = 0, sleepingChecks = 0,
+                retired = 0, failures = 0, invalid = 0, missing = 0,
+            },
+            batching = {
+                created = 0, expired = 0, failures = 0, fallbackPieces = 0,
+                pieces = 0, meshes = 0, vertices = 0, shadowedPieces = 0,
+                cacheHits = 0, cacheMisses = 0, sourceTime = 0,
+                transformTime = 0, buildTime = 0,
+                renderHooks = 0, drawnBatches = 0, culledBatches = 0, drawCalls = 0,
+                drawTime = 0, maxDrawTime = 0,
+            },
             frames = {
                 count = 0, totalTime = 0, minTime = math.huge, maxTime = 0,
                 over33ms = 0, over50ms = 0,
@@ -91,10 +105,12 @@ local function createDebrisProfile(Visuals, getDebris)
                 samples = 0, scanTime = 0,
                 totalActive = 0, totalModels = 0,
                 totalPhysics = 0, totalAwake = 0,
-                totalSleeping = 0, totalFading = 0,
+                totalSleeping = 0, totalRetired = 0,
+                totalBatched = 0, totalFading = 0,
                 maxActive = 0, maxModels = 0,
                 maxPhysics = 0, maxAwake = 0,
-                maxSleeping = 0, maxFading = 0,
+                maxSleeping = 0, maxRetired = 0,
+                maxBatched = 0, maxFading = 0,
             },
         }
     end
@@ -153,7 +169,7 @@ local function createDebrisProfile(Visuals, getDebris)
 
         local startedAt = clock()
         local debris = getDebris()
-        local models, physicsCount, awake, sleeping, fading = 0, 0, 0, 0, 0
+        local models, physicsCount, awake, sleeping, retired, fading = 0, 0, 0, 0, 0, 0
 
         for index = 1, #debris do
             local entity = debris[index]
@@ -169,26 +185,36 @@ local function createDebrisProfile(Visuals, getDebris)
                     else
                         awake = awake + 1
                     end
+                elseif entity.gebLib_DebrisRetiredPhysics then
+                    retired = retired + 1
                 else
                     models = models + 1
                 end
             end
         end
 
+        local batchState = Visuals.GetDebrisBatchState and Visuals.GetDebrisBatchState()
+        local batched = batchState and batchState.pieces or 0
+        local activeCount = #debris + batched
+
         local composition = data.composition
         composition.samples = composition.samples + 1
         composition.scanTime = composition.scanTime + clock() - startedAt
-        composition.totalActive = composition.totalActive + #debris
+        composition.totalActive = composition.totalActive + activeCount
         composition.totalModels = composition.totalModels + models
         composition.totalPhysics = composition.totalPhysics + physicsCount
         composition.totalAwake = composition.totalAwake + awake
         composition.totalSleeping = composition.totalSleeping + sleeping
+        composition.totalRetired = composition.totalRetired + retired
+        composition.totalBatched = composition.totalBatched + batched
         composition.totalFading = composition.totalFading + fading
-        composition.maxActive = math.max(composition.maxActive, #debris)
+        composition.maxActive = math.max(composition.maxActive, activeCount)
         composition.maxModels = math.max(composition.maxModels, models)
         composition.maxPhysics = math.max(composition.maxPhysics, physicsCount)
         composition.maxAwake = math.max(composition.maxAwake, awake)
         composition.maxSleeping = math.max(composition.maxSleeping, sleeping)
+        composition.maxRetired = math.max(composition.maxRetired, retired)
+        composition.maxBatched = math.max(composition.maxBatched, batched)
         composition.maxFading = math.max(composition.maxFading, fading)
     end
 
@@ -228,7 +254,8 @@ local function createDebrisProfile(Visuals, getDebris)
         local bucketMs = math.min(math.max(math.floor(elapsed * 1000 + 0.5), 0), 250)
         frames.histogram[bucketMs] = (frames.histogram[bucketMs] or 0) + 1
 
-        local bucketName = frameBucket(#getDebris())
+        local batchState = Visuals.GetDebrisBatchState and Visuals.GetDebrisBatchState()
+        local bucketName = frameBucket(#getDebris() + (batchState and batchState.pieces or 0))
         local bucket = frames.buckets[bucketName]
         if not bucket then
             bucket = {count = 0, totalTime = 0, maxTime = 0}
@@ -239,9 +266,19 @@ local function createDebrisProfile(Visuals, getDebris)
         bucket.maxTime = math.max(bucket.maxTime, elapsed)
     end
 
+    local function restoreDiagnostics()
+        if Visuals.SetDebrisRenderEnabled then Visuals.SetDebrisRenderEnabled(true) end
+        if Visuals.SetDebrisPhysicsEnabled then Visuals.SetDebrisPhysicsEnabled(true) end
+        if Visuals.SetDebrisPhysicsRetirement then Visuals.SetDebrisPhysicsRetirement(true) end
+        if Visuals.SetDebrisStaticBatching then Visuals.SetDebrisStaticBatching(false) end
+    end
+
     function Profile.SetActive(enabled)
         enabled = enabled == true
-        if active == enabled then return end
+        if active == enabled then
+            if not enabled then restoreDiagnostics() end
+            return
+        end
         active = enabled
         lastFrameAt = nil
         nextCompositionSampleAt = nil
@@ -253,6 +290,7 @@ local function createDebrisProfile(Visuals, getDebris)
             compareInitialization = false
             compareLegacyNext = true
             if hook and hook.Remove then hook.Remove("Think", HOOK_NAME) end
+            restoreDiagnostics()
         end
     end
 
@@ -300,11 +338,13 @@ local function createDebrisProfile(Visuals, getDebris)
         local water = data.water
         local waves = data.waves
         local lifecycle = data.lifecycle
+        local retirement = data.retirement
+        local batching = data.batching
         local frames = data.frames
         local composition = data.composition
         local impactDivisor = math.max(impacts.calls, 1)
         local debris = getDebris()
-        local activeModels, activePhysics, sleepingPhysics, fading = 0, 0, 0, 0
+        local activeModels, activePhysics, sleepingPhysics, retiredPhysics, fading = 0, 0, 0, 0, 0
 
         for index = 1, #debris do
             local entity = debris[index]
@@ -316,11 +356,18 @@ local function createDebrisProfile(Visuals, getDebris)
                 if IsValid(physics) then
                     activePhysics = activePhysics + 1
                     if physics.IsAsleep and physics:IsAsleep() then sleepingPhysics = sleepingPhysics + 1 end
+                elseif entity.gebLib_DebrisRetiredPhysics then
+                    retiredPhysics = retiredPhysics + 1
                 else
                     activeModels = activeModels + 1
                 end
             end
         end
+        local batchState = Visuals.GetDebrisBatchState and Visuals.GetDebrisBatchState() or {
+            enabled = false, batches = 0, pieces = 0,
+        }
+        local runtimeState = Visuals.GetDebrisRuntimeState and Visuals.GetDebrisRuntimeState() or {}
+        local activeCount = #debris + batchState.pieces
 
         profilePrint("debris profile: " .. string.format("%.1f", elapsed) .. " seconds")
         profilePrint("timing note: parent totals include child measurements; compare leaf averages directly")
@@ -330,9 +377,16 @@ local function createDebrisProfile(Visuals, getDebris)
                 .. (compareInitialization and "alternating legacy/optimized A/B" or "optimized")
         )
         profilePrint(
-            "active: " .. #debris .. " total, " .. activeModels .. " models, "
+            "active: " .. activeCount .. " total, " .. activeModels .. " models, "
                 .. activePhysics .. " physics (" .. sleepingPhysics .. " asleep), "
-                .. fading .. " fading"
+                .. retiredPhysics .. " retired props, " .. batchState.pieces
+                .. " batched pieces, " .. fading .. " fading"
+        )
+        profilePrint(
+            "diagnostics: retirement " .. (runtimeState.retirement == false and "off" or "on")
+                .. ", render " .. (runtimeState.render == false and "off" or "on")
+                .. ", physics " .. (runtimeState.physics == false and "off" or "on")
+                .. ", static batching " .. (batchState.enabled and "on" or "off")
         )
         profilePrint(
             "impacts: " .. impacts.calls .. " calls, " .. impacts.spawned
@@ -564,6 +618,43 @@ local function createDebrisProfile(Visuals, getDebris)
                 .. milliseconds(lifecycle.fadeDrawTime / math.max(lifecycle.fadeDrawCalls, 1))
                 .. " average, " .. milliseconds(lifecycle.maxFadeDrawTime) .. " maximum"
         )
+        profilePrint(
+            "physics retirement: " .. retirement.retired .. " retired, "
+                .. (runtimeState.trackedPhysics or retirement.tracked) .. " tracked, "
+                .. retirement.peakTracked .. " peak tracked, " .. retirement.failures
+                .. " failures, " .. retirement.invalid .. " invalid, " .. retirement.missing
+                .. " already missing"
+        )
+        profilePrint(
+            "physics retirement scans: " .. retirement.scans .. " scans, "
+                .. retirement.checks .. " checks (" .. retirement.awakeChecks .. " awake, "
+                .. retirement.sleepingChecks .. " asleep), "
+                .. milliseconds(retirement.scanTime / math.max(retirement.scans, 1)) .. " per scan, "
+                .. milliseconds(retirement.scanTime / math.max(retirement.checks, 1)) .. " per check"
+        )
+        if batching.created > 0 or batching.failures > 0 or batchState.pieces > 0 then
+            profilePrint(
+                "static batching: " .. batchState.batches .. " active batches, "
+                    .. batchState.pieces .. " active pieces; " .. batching.created .. " created, "
+                    .. batching.expired .. " expired, " .. batching.failures .. " failures, "
+                    .. batching.fallbackPieces .. " fallback pieces"
+            )
+            profilePrint(
+                "static batch creation: " .. batching.pieces .. " pieces, " .. batching.meshes
+                    .. " meshes, " .. batching.vertices .. " vertices, " .. batching.shadowedPieces
+                    .. " pieces requested shadows; source " .. milliseconds(batching.sourceTime)
+                    .. ", transform " .. milliseconds(batching.transformTime)
+                    .. ", build " .. milliseconds(batching.buildTime)
+            )
+            profilePrint(
+                "static batch cache/draw: " .. batching.cacheHits .. " hits, "
+                    .. batching.cacheMisses .. " misses; " .. batching.drawnBatches
+                    .. " batch draws, " .. batching.culledBatches .. " culled, "
+                    .. batching.drawCalls .. " mesh draws, "
+                    .. milliseconds(batching.drawTime / math.max(batching.renderHooks, 1))
+                    .. " per render hook, " .. milliseconds(batching.maxDrawTime) .. " maximum"
+            )
+        end
 
         if composition.samples > 0 then
             local compositionDivisor = composition.samples
@@ -574,14 +665,18 @@ local function createDebrisProfile(Visuals, getDebris)
                     .. string.format("%.1f", composition.totalPhysics / compositionDivisor) .. " physics ("
                     .. string.format("%.1f", composition.totalAwake / compositionDivisor) .. " awake, "
                     .. string.format("%.1f", composition.totalSleeping / compositionDivisor) .. " asleep), "
+                    .. string.format("%.1f", composition.totalRetired / compositionDivisor) .. " retired, "
+                    .. string.format("%.1f", composition.totalBatched / compositionDivisor) .. " batched, "
                     .. string.format("%.1f", composition.totalFading / compositionDivisor) .. " fading"
             )
             profilePrint(
                 "composition peaks: " .. composition.maxActive .. " active, "
                     .. composition.maxModels .. " models, " .. composition.maxPhysics
                     .. " physics (" .. composition.maxAwake .. " awake, "
-                    .. composition.maxSleeping .. " asleep), " .. composition.maxFading
-                    .. " fading; scan " .. milliseconds(composition.scanTime / compositionDivisor)
+                    .. composition.maxSleeping .. " asleep), "
+                    .. composition.maxRetired .. " retired, " .. composition.maxBatched .. " batched"
+                    .. ", fading " .. composition.maxFading
+                    .. "; scan " .. milliseconds(composition.scanTime / compositionDivisor)
                     .. " average"
             )
         end
@@ -637,6 +732,19 @@ local function createDebrisProfile(Visuals, getDebris)
         return true
     end
 
+    local function setDiagnostic(arguments, setter, label)
+        if not active then
+            profilePrint("run geblib_developer_debugmode 1 before changing debris diagnostics")
+            return false
+        end
+        local value = arguments and arguments[1]
+        local numeric = tonumber(value)
+        local enabled = numeric and numeric ~= 0 or value == "true"
+        local result = setter(enabled)
+        profilePrint(label .. " " .. (result and "enabled" or "disabled"))
+        return result
+    end
+
     Visuals.ResetDebrisProfile = Profile.Reset
     Visuals.ReportDebrisProfile = Profile.Report
     Visuals.SetDebrisInitializationComparison = Profile.SetInitializationComparison
@@ -659,6 +767,21 @@ local function createDebrisProfile(Visuals, getDebris)
             local value = arguments and arguments[1]
             local numeric = tonumber(value)
             Profile.SetInitializationComparison(numeric and numeric ~= 0 or value == "true")
+        end)
+        concommand.Add("geblib_debris_profile_retire_physics", function(_, _, arguments)
+            setDiagnostic(arguments, Visuals.SetDebrisPhysicsRetirement, "settled physics retirement")
+        end)
+        concommand.Add("geblib_debris_profile_batch_static", function(_, _, arguments)
+            local enabled = setDiagnostic(arguments, Visuals.SetDebrisStaticBatching, "static mesh batching")
+            if enabled then
+                profilePrint("static batching applies to new impacts and does not reproduce studio-model shadows")
+            end
+        end)
+        concommand.Add("geblib_debris_profile_render", function(_, _, arguments)
+            setDiagnostic(arguments, Visuals.SetDebrisRenderEnabled, "debris rendering")
+        end)
+        concommand.Add("geblib_debris_profile_physics", function(_, _, arguments)
+            setDiagnostic(arguments, Visuals.SetDebrisPhysicsEnabled, "debris physics")
         end)
     end
 
