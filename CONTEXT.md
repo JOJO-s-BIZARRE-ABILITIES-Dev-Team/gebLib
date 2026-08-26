@@ -61,6 +61,9 @@ A registered texture sequence projected onto world or entity geometry through a 
 **Particle Emitter Lease**:
 A keyed request for a shared client particle emitter that gebLib retires after its particles and idle window are exhausted.
 
+**Shockwave**:
+An oriented engine particle that expands and fades without a Lua render lifecycle.
+
 **Surface Description**:
 An immutable cached view of a Source surface property's normalized material and common impact sounds.
 
@@ -101,6 +104,7 @@ Opt-in observations about packet and record size, frequency, recipients, repeate
 - A **Debris Wave** executes one **Transient Visual Plan** that cannot be changed through its caller's settings table.
 - A **Projected Decal Animation** owns its material pool and cancels stale frame timers when a pool slot is reused.
 - A **Particle Emitter Lease** is owned by its key and may be acquired repeatedly by one visual stream.
+- A **Shockwave** transfers size, alpha, orientation, and expiration to the engine particle system.
 - A **Surface Description** belongs to one Source surface property identifier.
 - An **Impact Frame** executes one owned snapshot of a registered preset and sequence.
 - A **Network Message** is either server-to-client or client-to-server.

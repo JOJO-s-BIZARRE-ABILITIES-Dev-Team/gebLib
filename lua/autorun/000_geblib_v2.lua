@@ -1,7 +1,7 @@
 -- Developed by T0M and jopster1336
 
 gebLib = gebLib or {}
-gebLib.Version = "3.2.0"
+gebLib.Version = "3.3.0"
 gebLib.Loaded = false
 
 if game and game.AddParticles then game.AddParticles("particles/geblib_debris.pcf") end

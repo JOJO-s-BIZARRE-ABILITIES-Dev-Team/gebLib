@@ -24,11 +24,24 @@ function CurTime() return now end
 NULL = {valid = false}
 local vectorMeta = {}
 vectorMeta.__index = vectorMeta
+vectorMeta.__add = function(left, right)
+    return Vector(left.x + right.x, left.y + right.y, left.z + right.z)
+end
+vectorMeta.__mul = function(left, right)
+    if type(left) == "number" then left, right = right, left end
+    return Vector(left.x * right, left.y * right, left.z * right)
+end
 function vectorMeta:Add(other)
     self.x = self.x + other.x
     self.y = self.y + other.y
     self.z = self.z + other.z
 end
+function vectorMeta:LengthSqr() return self.x * self.x + self.y * self.y + self.z * self.z end
+function vectorMeta:GetNormalized()
+    local length = math.sqrt(self:LengthSqr())
+    return Vector(self.x / length, self.y / length, self.z / length)
+end
+function vectorMeta:Angle() return {normal = self} end
 function Vector(x, y, z) return setmetatable({x = x, y = y, z = z}, vectorMeta) end
 function VectorRand(minimum, maximum)
     return Vector(maximum, minimum, maximum)
@@ -49,8 +62,8 @@ end
 render = {}
 function render.SetBlend(blend) blendCalls[#blendCalls + 1] = blend end
 
-function ParticleEmitter(position)
-    local emitter = {position = position, particles = {}, finished = false}
+function ParticleEmitter(position, use3D)
+    local emitter = {position = position, use3D = use3D, particles = {}, finished = false}
     emitters[#emitters + 1] = emitter
 
     function emitter:Add(material, particlePosition)
@@ -69,9 +82,16 @@ function ParticleEmitter(position)
         function particle:SetRoll(value) self.roll = value end
         function particle:SetRollDelta(value) self.rollDelta = value end
         function particle:SetBounce(value) self.bounce = value end
+        function particle:SetAirResistance(value) self.airResistance = value end
+        function particle:SetStartLength(value) self.startLength = value end
+        function particle:SetEndLength(value) self.endLength = value end
+        function particle:SetAngles(value) self.angles = value end
         return particle
     end
 
+    function emitter:IsValid() return true end
+    function emitter:GetNumActiveParticles() return #self.particles end
+    function emitter:SetPos(value) self.position = value end
     function emitter:Finish() self.finished = true end
     return emitter
 end
@@ -137,6 +157,9 @@ do
         gravity = gravity,
         collide = false,
         lighting = true,
+        airResistance = 40,
+        length = 12,
+        endLength = 24,
         color = {r = 10, g = 20, b = 30, a = 200},
     })
 
@@ -159,6 +182,9 @@ do
     assertEqual(particle.collide, false, "particle collision")
     assertEqual(particle.lighting, true, "particle lighting")
     assertEqual(particle.bounce, nil, "non-colliding particles should skip bounce")
+    assertEqual(particle.airResistance, 40, "particle air resistance")
+    assertEqual(particle.startLength, 12, "particle start length")
+    assertEqual(particle.endLength, 24, "particle end length")
 
     assertEqual(Visuals.CreateDebrisBurst("effects/fleck", position, 1), 1, "default particle burst")
     local defaultParticle = emitters[#emitters].particles[1]
@@ -167,6 +193,43 @@ do
     assertEqual(defaultParticle.lighting, false, "particle lighting default")
     assertEqual(Visuals.CreateDebrisBurst("", position, 1000), 0, "empty particle material")
     assertEqual(Visuals.CreateDebrisBurst("effects/fleck", position, 0), 0, "empty particle burst")
+
+    local ranged = Visuals.CreateDebrisBurst("effects/fleck", position, 10, {
+        lifetimeMin = 0.4,
+        lifetimeMax = 0.8,
+        sizeMin = 2,
+        sizeMax = 6,
+        endSizeMin = 8,
+        endSizeMax = 12,
+        speedMin = 20,
+        speedMax = 40,
+        maxActiveParticles = 3,
+    })
+    local rangedEmitter = emitters[#emitters]
+    assertEqual(ranged, 3, "active particle cap")
+    assertNear(rangedEmitter.particles[1].dieTime, 0.6, 0.0001, "random lifetime range")
+    assertEqual(rangedEmitter.particles[1].startSize, 4, "random size range")
+    assertEqual(rangedEmitter.particles[1].endSize, 10, "random end size range")
+
+    local sharedEmitter = ParticleEmitter(position, false)
+    assertEqual(Visuals.CreateDebrisBurst("effects/fleck", position, 2, {
+        emitter = sharedEmitter,
+        maxActiveParticles = 3,
+    }), 2, "shared emitter first burst")
+    assertEqual(Visuals.CreateDebrisBurst("effects/fleck", position, 2, {
+        emitter = sharedEmitter,
+        maxActiveParticles = 3,
+    }), 1, "shared emitter remaining capacity")
+    assertEqual(sharedEmitter.finished, false, "shared emitter lifecycle remains with caller")
+
+    assertEqual(Visuals.CreateShockwave(position, Vector(0, 0, 1), 120, 0.5), 2,
+        "shockwave ring and distortion")
+    local shockwaveEmitter = emitters[#emitters]
+    assertEqual(shockwaveEmitter.use3D, true, "shockwave uses oriented particles")
+    assertEqual(shockwaveEmitter.finished, true, "shockwave emitter should finish")
+    assertEqual(#shockwaveEmitter.particles, 2, "shockwave particle layers")
+    assertEqual(shockwaveEmitter.particles[1].startSize, 0, "shockwave start radius")
+    assertEqual(shockwaveEmitter.particles[1].endSize, 120, "shockwave end radius")
 end
 
 do

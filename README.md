@@ -381,7 +381,20 @@ Debris is client-only and capped at 512 active entities by default. Creating ano
 
 `CreateDebris` uses one shared event scheduler instead of a per-frame scan. Entity debris stays on the engine draw path and uses native render FX for its final fade, without per-frame Lua drawing. Render-only `ClientsideModel` debris grows through engine interpolation. Physical client props skip animated scaling to avoid client trace errors.
 
-Use `CreateDebrisBurst` for hundreds or thousands of cosmetic fragments. It creates one engine particle emitter instead of one entity per fragment and returns the number emitted. It accepts a material rather than a model. World collision is enabled by default; pass `collide = false` for the highest throughput. Optional settings are `lifetime`, `size`, `endSize`, `speed`, `spin`, `velocity`, `direction`, `spread`, `gravity`, `bounce`, `color`, `collide`, and `lighting`.
+Use `CreateDebrisBurst` for hundreds or thousands of cosmetic fragments. It creates one engine particle emitter instead of one entity per fragment and returns the number emitted. It accepts a material rather than a model. World collision is enabled by default; pass `collide = false` for the highest throughput.
+
+`lifetime`, `size`, `endSize`, and `speed` retain their fixed-value behavior. Add `Min` and `Max`, such as `lifetimeMin` and `lifetimeMax`, to randomize one of those values. Other optional settings are `spin`, `velocity`, `direction`, `spread`, `gravity`, `bounce`, `color`, `collide`, `lighting`, `airResistance`, `length`, `endLength`, and `maxActiveParticles`. Pass an existing particle emitter as `emitter` to share its active-particle limit and lifecycle.
+
+Create an expanding shockwave without a Lua draw hook:
+
+```lua
+gebLib.Visuals.CreateShockwave(position, normal, 600, 0.35, {
+    startRadius = 12,
+    color = Color(255, 230, 190),
+})
+```
+
+The engine interpolates its size and alpha. A distortion layer is included by default; use `distortion = false` for a single ring.
 
 `CreateImpactDebris` creates a complete surface-aware impact. By default it keeps geometry bounded to 16 static low-poly chunks and 12 physical chunks, then renders the remaining count as cheap non-colliding particles. Accepted static chunks from each impact are combined into static meshes by default. Physical rock chunks use volume-preserving convex box hulls, begin as client props, and retire their physics after two sleep confirmations. With static batching enabled, retired chunks then move into spatial static batches while keeping their original lifetime and fade. The retirement scan adapts to cover the tracked props every 0.5 seconds. `MAT_SLOSH`, or a point touching water when `material` is omitted, automatically uses water debris instead of rocks and smoke. Pass `modelCount`, `propCount`, and `particleCount` when an effect needs an exact visual composition. `preserveCount = true` lets that effect exceed the shared entity budget. Surface materials are sampled once and cached. Static batches share cached world-lighting samples and reproduce the native fast-fade curve with one batch-level blend. Smoke is capped at 96 sprites per impact; pass `smokeCount` to request a smaller amount. Other options include `material`, `direction`, `craters`, `props`, `particles`, `smoke`, `surface`, `modelScale`, `lifetime`, `propLifetime`, and `shadows`.
 

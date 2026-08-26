@@ -44,7 +44,7 @@ local function createDebrisProfile(Visuals, getDebris)
             },
             bursts = {
                 calls = 0, requestedParticles = 0, particles = 0,
-                failed = 0, failedParticles = 0,
+                failed = 0, failedParticles = 0, cappedParticles = 0,
                 emitterGroups = 0,
                 totalTime = 0, maxTime = 0, planTime = 0,
                 emitterTime = 0, addTime = 0, velocityTime = 0,
@@ -529,7 +529,7 @@ local function createDebrisProfile(Visuals, getDebris)
                 .. "/" .. bursts.requestedParticles .. " particles, "
                 .. bursts.emitterGroups .. " emitters, "
                 .. bursts.failed .. " emitter failures, " .. bursts.failedParticles
-                .. " particle failures, "
+                .. " particle failures, " .. bursts.cappedParticles .. " capped, "
                 .. milliseconds(bursts.totalTime / math.max(bursts.calls, 1))
                 .. " average, " .. milliseconds(bursts.maxTime) .. " maximum"
         )

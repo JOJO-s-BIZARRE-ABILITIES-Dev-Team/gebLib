@@ -20,20 +20,64 @@ local function installVisualParticles(Visuals, Profile)
         return owned
     end
 
+    local function numberRange(options, name, fallback, minimum)
+        local value = tonumber(options[name]) or fallback
+        local lower = tonumber(options[name .. "Min"])
+        local upper = tonumber(options[name .. "Max"])
+        if lower == nil and upper == nil then
+            lower = value
+            upper = value
+        else
+            lower = lower or upper
+            upper = upper or lower
+        end
+        if minimum ~= nil then
+            lower = math.max(lower, minimum)
+            upper = math.max(upper, minimum)
+        end
+        if lower > upper then lower, upper = upper, lower end
+        return lower, upper
+    end
+
+    local function randomRange(lower, upper)
+        if lower == upper then return lower end
+        return math.Rand(lower, upper)
+    end
+
     local function normalizeBurst(materialPath, position, count, options)
         count = math.max(math.floor(tonumber(count) or 0), 0)
         if count == 0 or type(materialPath) ~= "string" or materialPath == "" then return end
 
         options = copyOptions(options)
         local color = options.color or color_white
+        local lifetimeMin, lifetimeMax = numberRange(options, "lifetime", 5, 0.01)
+        local sizeMin, sizeMax = numberRange(options, "size", 4, 0)
+        local speedMin, speedMax = numberRange(options, "speed", 250, 0)
+        local endSizeTracksStart = options.endSize == nil
+            and options.endSizeMin == nil
+            and options.endSizeMax == nil
+        local endSizeMin, endSizeMax
+        if not endSizeTracksStart then
+            endSizeMin, endSizeMax = numberRange(options, "endSize", sizeMin, 0)
+        end
+        local maximumActive = tonumber(options.maxActiveParticles)
+        if maximumActive ~= nil then
+            maximumActive = math.max(math.floor(maximumActive), 0)
+        end
         return {
             materialPath = materialPath,
             position = position or vector_origin,
             count = count,
-            lifetime = math.max(tonumber(options.lifetime) or 5, 0.01),
-            size = math.max(tonumber(options.size) or 4, 0),
-            endSize = math.max(tonumber(options.endSize) or tonumber(options.size) or 4, 0),
-            speed = math.max(tonumber(options.speed) or 250, 0),
+            requestedCount = count,
+            lifetimeMin = lifetimeMin,
+            lifetimeMax = lifetimeMax,
+            sizeMin = sizeMin,
+            sizeMax = sizeMax,
+            endSizeMin = endSizeMin,
+            endSizeMax = endSizeMax,
+            endSizeTracksStart = endSizeTracksStart,
+            speedMin = speedMin,
+            speedMax = speedMax,
             spin = math.rad(tonumber(options.spin) or 180),
             velocity = options.velocity,
             direction = options.direction,
@@ -46,6 +90,12 @@ local function installVisualParticles(Visuals, Profile)
             green = color.g or 255,
             blue = color.b or 255,
             alpha = color.a or 255,
+            airResistance = tonumber(options.airResistance),
+            length = tonumber(options.length),
+            endLength = tonumber(options.endLength),
+            maxActiveParticles = maximumActive,
+            emitter = options.emitter,
+            use3D = options.use3D == true,
         }
     end
 
@@ -88,22 +138,33 @@ local function installVisualParticles(Visuals, Profile)
         local burstStats = profiling and Profile.Data().bursts
         if profiling then
             burstStats.calls = burstStats.calls + 1
-            burstStats.requestedParticles = burstStats.requestedParticles + plan.count
+            burstStats.requestedParticles = burstStats.requestedParticles + plan.requestedCount
             recordDuration(burstStats, "planTime", planStartedAt)
         end
         return plan, burstStats
     end
 
-    local function emitBurstPlans(plans, emitterPosition, burstStats, profileStartedAt)
+    local function emitterIsValid(emitter)
+        if not emitter or not emitter.Add then return false end
+        return not emitter.IsValid or emitter:IsValid()
+    end
+
+    local function emitBurstPlans(plans, emitterPosition, burstStats, profileStartedAt, suppliedEmitter)
         if #plans == 0 then return 0 end
 
         local emitterStartedAt = burstStats and profileClock()
-        local emitter = ParticleEmitter(emitterPosition)
+        local emitter = suppliedEmitter
+        local ownsEmitter = not emitterIsValid(emitter)
+        if ownsEmitter then
+            emitter = ParticleEmitter(emitterPosition, plans[1].use3D)
+        elseif emitter.SetPos then
+            emitter:SetPos(emitterPosition)
+        end
         if burstStats then
             recordDuration(burstStats, "emitterTime", emitterStartedAt)
             burstStats.emitterGroups = burstStats.emitterGroups + 1
         end
-        if not emitter then
+        if not emitterIsValid(emitter) then
             if burstStats then
                 burstStats.failed = burstStats.failed + #plans
                 local elapsed = recordDuration(burstStats, "totalTime", profileStartedAt)
@@ -113,32 +174,50 @@ local function installVisualParticles(Visuals, Profile)
         end
 
         local emitted = 0
+        local startingActive = emitter.GetNumActiveParticles
+            and emitter:GetNumActiveParticles()
+            or 0
 
         for planIndex = 1, #plans do
             local plan = plans[planIndex]
             local layerStartedAt = plan.profileStats and profileClock()
-            for index = 1, plan.count do
+            local count = plan.count
+            if plan.maxActiveParticles ~= nil then
+                local active = emitter.GetNumActiveParticles
+                    and emitter:GetNumActiveParticles()
+                    or startingActive + emitted
+                count = math.min(count, math.max(plan.maxActiveParticles - active, 0))
+                if burstStats then
+                    burstStats.cappedParticles = burstStats.cappedParticles + plan.count - count
+                end
+            end
+            for index = 1, count do
                 local addStartedAt = burstStats and profileClock()
                 local particle = emitter:Add(plan.materialPath, plan.position)
                 if burstStats then recordDuration(burstStats, "addTime", addStartedAt) end
                 if particle then
                     local velocityStartedAt = burstStats and profileClock()
+                    local speed = randomRange(plan.speedMin, plan.speedMax)
                     local particleVelocity
                     if plan.direction then
-                        particleVelocity = plan.direction * plan.speed
-                            + VectorRand(-plan.speed * plan.spread, plan.speed * plan.spread)
+                        particleVelocity = plan.direction * speed
+                            + VectorRand(-speed * plan.spread, speed * plan.spread)
                     else
-                        particleVelocity = VectorRand(-plan.speed, plan.speed)
+                        particleVelocity = VectorRand(-speed, speed)
                     end
                     if plan.velocity then particleVelocity:Add(plan.velocity) end
                     if burstStats then recordDuration(burstStats, "velocityTime", velocityStartedAt) end
 
                     local setupStartedAt = burstStats and profileClock()
-                    particle:SetDieTime(plan.lifetime)
+                    local size = randomRange(plan.sizeMin, plan.sizeMax)
+                    local endSize = plan.endSizeTracksStart
+                        and size
+                        or randomRange(plan.endSizeMin, plan.endSizeMax)
+                    particle:SetDieTime(randomRange(plan.lifetimeMin, plan.lifetimeMax))
                     particle:SetStartAlpha(plan.alpha)
                     particle:SetEndAlpha(0)
-                    particle:SetStartSize(plan.size)
-                    particle:SetEndSize(plan.endSize)
+                    particle:SetStartSize(size)
+                    particle:SetEndSize(endSize)
                     particle:SetColor(plan.red, plan.green, plan.blue)
                     particle:SetVelocity(particleVelocity)
                     particle:SetGravity(plan.gravity)
@@ -147,6 +226,14 @@ local function installVisualParticles(Visuals, Profile)
                     particle:SetRoll(math.Rand(-math.pi, math.pi))
                     particle:SetRollDelta(math.Rand(-plan.spin, plan.spin))
                     if plan.collide then particle:SetBounce(plan.bounce) end
+                    if plan.airResistance ~= nil then
+                        particle:SetAirResistance(math.max(plan.airResistance, 0))
+                    end
+                    if plan.length ~= nil then
+                        local length = math.max(plan.length, 0)
+                        particle:SetStartLength(length)
+                        particle:SetEndLength(math.max(plan.endLength or length, 0))
+                    end
                     if burstStats then recordDuration(burstStats, "setupTime", setupStartedAt) end
                     emitted = emitted + 1
                 elseif burstStats then
@@ -159,7 +246,7 @@ local function installVisualParticles(Visuals, Profile)
         end
 
         local finishStartedAt = burstStats and profileClock()
-        emitter:Finish()
+        if ownsEmitter then emitter:Finish() end
         if burstStats then
             recordDuration(burstStats, "finishTime", finishStartedAt)
             burstStats.particles = burstStats.particles + emitted
@@ -174,7 +261,78 @@ local function installVisualParticles(Visuals, Profile)
         local profileStartedAt = profiling and profileClock()
         local plan, burstStats = prepareBurstPlan(materialPath, position, count, options)
         if not plan then return 0 end
-        return emitBurstPlans({plan}, plan.position, burstStats, profileStartedAt)
+        return emitBurstPlans({plan}, plan.position, burstStats, profileStartedAt, plan.emitter)
+    end
+
+    local function addShockwaveParticle(emitter, material, position, angles, lifetime, startRadius,
+        radius, color, alpha, lighting)
+        local particle = emitter:Add(material, position)
+        if not particle then return false end
+
+        particle:SetDieTime(lifetime)
+        particle:SetStartAlpha(alpha)
+        particle:SetEndAlpha(0)
+        particle:SetStartSize(startRadius)
+        particle:SetEndSize(radius)
+        particle:SetColor(color.r or 255, color.g or 255, color.b or 255)
+        particle:SetAngles(angles)
+        particle:SetCollide(false)
+        particle:SetLighting(lighting)
+        return true
+    end
+
+    function Visuals.CreateShockwave(position, normal, radius, lifetime, options)
+        options = type(options) == "table" and options or {}
+        position = position or vector_origin
+        normal = normal or vector_up
+        if normal:LengthSqr() == 0 then normal = vector_up end
+        normal = normal:GetNormalized()
+        radius = math.max(tonumber(radius) or 0, 0)
+        lifetime = math.max(tonumber(lifetime) or 0.4, 0.01)
+        if radius == 0 then return 0 end
+
+        local offset = tonumber(options.offset) or 5
+        local particlePosition = position + normal * offset
+        local emitter = ParticleEmitter(particlePosition, true)
+        if not emitter then return 0 end
+
+        local color = options.color or color_white
+        local angles = normal:Angle()
+        local startRadius = math.max(tonumber(options.startRadius) or 0, 0)
+        local lighting = options.lighting == true
+        local emitted = 0
+        if addShockwaveParticle(
+            emitter,
+            options.material or "particle/particle_ring_wave_additive",
+            particlePosition,
+            angles,
+            lifetime,
+            startRadius,
+            radius,
+            color,
+            tonumber(options.alpha) or color.a or 200,
+            lighting
+        ) then
+            emitted = emitted + 1
+        end
+
+        if options.distortion ~= false and addShockwaveParticle(
+            emitter,
+            options.distortionMaterial or "particle/warp1_warp",
+            particlePosition,
+            angles,
+            lifetime,
+            startRadius,
+            radius * math.max(tonumber(options.distortionScale) or 1, 0),
+            color_white,
+            tonumber(options.distortionAlpha) or 255,
+            false
+        ) then
+            emitted = emitted + 1
+        end
+
+        emitter:Finish()
+        return emitted
     end
     local function waterEffect(name, position, normal, scale)
         if not EffectData or not util or not util.Effect then return false end
