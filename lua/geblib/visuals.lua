@@ -41,10 +41,13 @@ local profileClock
 local recordDuration
 local BATCH_HOOK_NAME = "gebLib.Visuals.DebrisBatches"
 local PROMOTION_HOOK_NAME = "gebLib.Visuals.DebrisPromotions"
+local MESH_WARMUP_HOOK_NAME = "gebLib.Visuals.DebrisMeshWarmup"
 local MAX_BATCH_VERTICES = 60000
-local MAX_PROMOTION_PIECES_PER_FRAME = 16
+local MAX_PROMOTION_PIECES_PER_FRAME = 64
 local BATCH_TRIANGLE_ORDER = {0, 2, 1}
 local BATCH_LIGHTING_INTERVAL = 0.25
+local BATCH_LIGHTING_CELL_SIZE = 128
+local MAX_LIGHTING_REFRESHES_PER_HOOK = 2
 local BATCH_LIGHTING_DIRECTIONS = {
     {BOX_FRONT, Vector(1, 0, 0)},
     {BOX_BACK, Vector(-1, 0, 0)},
@@ -61,11 +64,18 @@ local promotionGroups = {}
 local promotionHead = 1
 local promotionTail = 0
 local pendingPromotionPieces = 0
+local pendingStaticGroups = {}
+local pendingStaticOrder = {}
+local pendingStaticPieces = 0
+local pendingBatchScheduler = {}
+local lightingCells = {}
+local flushPendingStaticPieces
 Visuals.StaticBatchingDefault = Visuals.StaticBatchingDefault ~= false
 local staticBatchingEnabled = Visuals.StaticBatchingDefault
 
 if hook and hook.Remove then hook.Remove("PostDrawOpaqueRenderables", BATCH_HOOK_NAME) end
 if hook and hook.Remove then hook.Remove("Think", PROMOTION_HOOK_NAME) end
+if hook and hook.Remove then hook.Remove("Think", MESH_WARMUP_HOOK_NAME) end
 
 local function batchStats()
     if not Profile or not Profile.IsActive() then return end
@@ -77,6 +87,19 @@ local function destroyBatch(batch)
         local drawing = batch.meshes[index]
         if drawing.mesh and drawing.mesh.Destroy then drawing.mesh:Destroy() end
     end
+
+    local cell = batch.lightingCell
+    if cell then
+        cell.references = cell.references - 1
+        if cell.references <= 0 then lightingCells[cell.key] = nil end
+    end
+end
+
+local function clearPendingStaticPieces()
+    Runtime.Unregister(pendingBatchScheduler)
+    pendingStaticGroups = {}
+    pendingStaticOrder = {}
+    pendingStaticPieces = 0
 end
 
 local function clearPromotionQueue()
@@ -99,16 +122,23 @@ end
 
 function Visuals.ClearDebrisBatches()
     clearPromotionQueue()
+    clearPendingStaticPieces()
     for index = #debrisBatches, 1, -1 do
         destroyBatch(debrisBatches[index])
         debrisBatches[index] = nil
     end
     activeBatchPieces = 0
+    lightingCells = {}
 end
 
 function Visuals.SetDebrisStaticBatching(enabled)
-    staticBatchingEnabled = enabled == true
-    if not staticBatchingEnabled then clearPromotionQueue() end
+    local shouldEnable = enabled == true
+    if not shouldEnable and flushPendingStaticPieces then flushPendingStaticPieces() end
+    staticBatchingEnabled = shouldEnable
+    if not staticBatchingEnabled then
+        clearPromotionQueue()
+        clearPendingStaticPieces()
+    end
     return staticBatchingEnabled
 end
 
@@ -118,10 +148,13 @@ function Visuals.GetDebrisBatchState()
         batches = #debrisBatches,
         pieces = activeBatchPieces,
         pendingPromotions = pendingPromotionPieces,
+        pendingPieces = pendingStaticPieces,
+        lightingCells = table.Count and table.Count(lightingCells) or 0,
+        promotionBudget = MAX_PROMOTION_PIECES_PER_FRAME,
     }
 end
 
-local function sourceMeshes(modelPath, stats)
+local function sourceMeshes(modelPath, stats, cacheFailure)
     local cached = modelMeshCache[modelPath]
     if cached ~= nil then
         if stats then stats.cacheHits = stats.cacheHits + 1 end
@@ -131,9 +164,28 @@ local function sourceMeshes(modelPath, stats)
     if stats then stats.cacheMisses = stats.cacheMisses + 1 end
     local startedAt = stats and profileClock and profileClock()
     local meshes = util.GetModelMeshes and util.GetModelMeshes(modelPath, 0)
-    modelMeshCache[modelPath] = meshes or false
+    if meshes then
+        modelMeshCache[modelPath] = meshes
+    elseif cacheFailure ~= false then
+        modelMeshCache[modelPath] = false
+    end
     if stats then recordDuration(stats, "sourceTime", startedAt) end
     return meshes
+end
+
+if hook and hook.Add and Surface.AllModels and util and util.GetModelMeshes then
+    local warmupIndex = 1
+    hook.Add("Think", MESH_WARMUP_HOOK_NAME, function()
+        local modelPath = Surface.AllModels[warmupIndex]
+        if not modelPath then
+            hook.Remove("Think", MESH_WARMUP_HOOK_NAME)
+            return
+        end
+
+        if sourceMeshes(modelPath, nil, false) then
+            warmupIndex = warmupIndex + 1
+        end
+    end)
 end
 
 local function recordBatchTiming(stats, startedAt, transformTime, buildTime)
@@ -183,15 +235,43 @@ local function appendBatchSource(group, piece, triangles)
     return true
 end
 
+local function batchCell(position)
+    local x = math.floor(position.x / BATCH_LIGHTING_CELL_SIZE)
+    local y = math.floor(position.y / BATCH_LIGHTING_CELL_SIZE)
+    local z = math.floor(position.z / BATCH_LIGHTING_CELL_SIZE)
+    return x .. ":" .. y .. ":" .. z, x, y, z
+end
+
+local function lightingCellFor(position)
+    local key, x, y, z = batchCell(position)
+    local cell = lightingCells[key]
+    if cell then
+        cell.references = cell.references + 1
+        return cell
+    end
+
+    local phaseIndex = math.abs(x * 73 + y * 193 + z * 389) % 16
+    cell = {
+        key = key,
+        position = Vector(position.x, position.y, position.z),
+        phase = phaseIndex / 16 * BATCH_LIGHTING_INTERVAL,
+        references = 1,
+        revision = 0,
+    }
+    lightingCells[key] = cell
+    return cell
+end
+
 local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
     if #pieces == 0 or not Mesh or not mesh or not mesh.Begin or not util.GetModelMeshes then return false end
     local stats = batchStats()
     local totalStartedAt = stats and profileClock()
     local transformTime = 0
     local buildTime = 0
-    local groups = {}
+    local groups
     local groupOrder = {}
     local bounds = {}
+    local centerX, centerY, centerZ = 0, 0, 0
 
     local function fail(built)
         if built then destroyBuiltMeshes(built) end
@@ -202,8 +282,40 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
         return false
     end
 
+    local sharedMaterialName = pieces[1].material
+    local singleMaterial = type(sharedMaterialName) == "string" and sharedMaterialName ~= ""
+    if singleMaterial then
+        for pieceIndex = 2, #pieces do
+            if pieces[pieceIndex].material ~= sharedMaterialName then
+                singleMaterial = false
+                break
+            end
+        end
+    end
+
+    local singleGroup
+    if singleMaterial then
+        local material = Material(sharedMaterialName)
+        if not material or material.IsError and material:IsError() then return fail() end
+        singleGroup = {
+            material = material,
+            chunks = {{entries = {}, vertexCount = 0}},
+        }
+        groupOrder[1] = singleGroup
+    else
+        groups = {}
+    end
+
     for pieceIndex = 1, #pieces do
         local piece = pieces[pieceIndex]
+        local angles = piece.angles or angle_zero
+        piece.scale = tonumber(piece.scale) or 1
+        piece.batchForward = angles:Forward()
+        piece.batchRight = angles:Right()
+        piece.batchUp = angles:Up()
+        centerX = centerX + piece.position.x
+        centerY = centerY + piece.position.y
+        centerZ = centerZ + piece.position.z
         local sources = sourceMeshes(piece.modelPath, stats)
         if not sources then return fail() end
 
@@ -211,16 +323,19 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
             local source = sources[sourceIndex]
             local materialName = piece.material or source.material
             if materialName and source.triangles then
-                local group = groups[materialName]
+                local group = singleGroup
                 if not group then
-                    local material = Material(materialName)
-                    if not material or material.IsError and material:IsError() then return fail() end
-                    group = {
-                        material = material,
-                        chunks = {{entries = {}, vertexCount = 0}},
-                    }
-                    groups[materialName] = group
-                    groupOrder[#groupOrder + 1] = group
+                    group = groups[materialName]
+                    if not group then
+                        local material = Material(materialName)
+                        if not material or material.IsError and material:IsError() then return fail() end
+                        group = {
+                            material = material,
+                            chunks = {{entries = {}, vertexCount = 0}},
+                        }
+                        groups[materialName] = group
+                        groupOrder[#groupOrder + 1] = group
+                    end
                 end
                 if not appendBatchSource(group, piece, source.triangles) then return fail() end
             end
@@ -251,20 +366,32 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
                     for entryIndex = 1, #chunk.entries do
                         local entry = chunk.entries[entryIndex]
                         local piece = entry.piece
+                        local forward = piece.batchForward
+                        local right = piece.batchRight
+                        local up = piece.batchUp
+                        local origin = piece.position
+                        local scale = piece.scale
                         for triangleIndex = entry.firstVertex, entry.lastVertex, 3 do
                             for corner = 1, 3 do
                                 local vertex = entry.triangles[triangleIndex + BATCH_TRIANGLE_ORDER[corner]]
-                                position.x = vertex.pos.x * piece.scale
-                                position.y = vertex.pos.y * piece.scale
-                                position.z = vertex.pos.z * piece.scale
-                                position:Rotate(piece.angles)
-                                position:Add(piece.position)
+                                local sourcePosition = vertex.pos
+                                local localX = sourcePosition.x * scale
+                                local localY = sourcePosition.y * scale
+                                local localZ = sourcePosition.z * scale
+                                position.x = origin.x
+                                    + forward.x * localX - right.x * localY + up.x * localZ
+                                position.y = origin.y
+                                    + forward.y * localX - right.y * localY + up.y * localZ
+                                position.z = origin.z
+                                    + forward.z * localX - right.z * localY + up.z * localZ
 
                                 local sourceNormal = vertex.normal or vector_up
-                                normal.x = sourceNormal.x
-                                normal.y = sourceNormal.y
-                                normal.z = sourceNormal.z
-                                normal:Rotate(piece.angles)
+                                normal.x = forward.x * sourceNormal.x
+                                    - right.x * sourceNormal.y + up.x * sourceNormal.z
+                                normal.y = forward.y * sourceNormal.x
+                                    - right.y * sourceNormal.y + up.y * sourceNormal.z
+                                normal.z = forward.z * sourceNormal.x
+                                    - right.z * sourceNormal.y + up.z * sourceNormal.z
 
                                 if not bounds.mins then
                                     bounds.mins = Vector(position.x, position.y, position.z)
@@ -308,9 +435,13 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
 
     if #built == 0 or not bounds.mins then return fail(built) end
 
-    local center = vector_origin
-    for index = 1, #pieces do center = center + pieces[index].position end
-    center = center / #pieces
+    local inversePieceCount = 1 / #pieces
+    local center = Vector(
+        centerX * inversePieceCount,
+        centerY * inversePieceCount,
+        centerZ * inversePieceCount
+    )
+    local lightingCell = lightingCellFor(center)
     debrisBatches[#debrisBatches + 1] = {
         meshes = built,
         center = center,
@@ -319,6 +450,7 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
         expiresAt = expiresAt or CurTime() + lifetime,
         pieceCount = #pieces,
         shadowsRequested = shadows,
+        lightingCell = lightingCell,
     }
     activeBatchPieces = activeBatchPieces + #pieces
     if stats then
@@ -327,8 +459,116 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
         stats.pieces = stats.pieces + #pieces
         stats.meshes = stats.meshes + #built
         stats.vertices = stats.vertices + vertices
+        if singleMaterial then stats.singleMaterialBuilds = stats.singleMaterialBuilds + 1 end
         if shadows then stats.shadowedPieces = stats.shadowedPieces + #pieces end
     end
+    return true
+end
+
+local function fallbackStaticPieces(group)
+    local remaining = group.expiresAt - CurTime()
+    if remaining <= 0 then return end
+
+    for index = 1, #group.pieces do
+        local piece = group.pieces[index]
+        local entity = Visuals.CreateDebris(
+            piece.modelPath,
+            false,
+            remaining,
+            group.preserveCount,
+            nil,
+            false
+        )
+        if IsValid(entity) then
+            entity:SetPos(piece.position)
+            entity:SetAngles(piece.angles)
+            entity:SetModelScale(piece.scale, 0)
+            if piece.material then entity:SetMaterial(piece.material) end
+            if not group.shadows then
+                entity:DestroyShadow()
+                entity:DrawShadow(false)
+            end
+        end
+    end
+end
+
+flushPendingStaticPieces = function()
+    if pendingStaticPieces == 0 then
+        Runtime.Unregister(pendingBatchScheduler)
+        return false
+    end
+
+    Runtime.Unregister(pendingBatchScheduler)
+    local groups = pendingStaticOrder
+    pendingStaticGroups = {}
+    pendingStaticOrder = {}
+    pendingStaticPieces = 0
+    local stats = batchStats()
+    if stats then stats.queueFlushes = stats.queueFlushes + 1 end
+
+    for index = 1, #groups do
+        local group = groups[index]
+        local ok, built = pcall(
+            buildStaticBatch,
+            group.pieces,
+            0,
+            group.shadows,
+            group.expiresAt
+        )
+        if not ok or not built then
+            fallbackStaticPieces(group)
+            if stats then
+                if not ok then stats.failures = stats.failures + 1 end
+                stats.queuedFallbackPieces = stats.queuedFallbackPieces + #group.pieces
+            end
+        elseif stats then
+            stats.queuedBuilds = stats.queuedBuilds + 1
+        end
+    end
+    return false
+end
+
+local function queueStaticDebrisPiece(piece, lifetime, shadows, preserveCount)
+    if not staticBatchingEnabled
+        or type(piece) ~= "table"
+        or type(piece.modelPath) ~= "string"
+        or piece.modelPath == ""
+        or not piece.position
+        or not piece.angles
+    then
+        return false
+    end
+
+    lifetime = math.max(tonumber(lifetime) or 0, 0)
+    local expiresAt = CurTime() + lifetime
+    local cellKey = batchCell(piece.position)
+    local key = cellKey .. "\n" .. tostring(piece.material or "")
+        .. "\n" .. tostring(expiresAt) .. "\n" .. tostring(shadows ~= false)
+    local group = pendingStaticGroups[key]
+    if not group then
+        group = {
+            pieces = {},
+            expiresAt = expiresAt,
+            shadows = shadows ~= false,
+            preserveCount = preserveCount == true,
+        }
+        pendingStaticGroups[key] = group
+        pendingStaticOrder[#pendingStaticOrder + 1] = group
+    elseif preserveCount then
+        group.preserveCount = true
+    end
+
+    group.pieces[#group.pieces + 1] = piece
+    pendingStaticPieces = pendingStaticPieces + 1
+    local stats = batchStats()
+    if stats then stats.queuedPieces = stats.queuedPieces + 1 end
+    Runtime.Register(
+        pendingBatchScheduler,
+        "Static debris frame batch",
+        flushPendingStaticPieces,
+        clearPendingStaticPieces,
+        clearPendingStaticPieces
+    )
     return true
 end
 
@@ -381,7 +621,8 @@ local function processPromotionQueue()
     end
 
     if group.head > group.tail then
-        promotionGroups[group.key] = nil
+        group.ownerGroups[group.groupKey] = nil
+        if next(group.ownerGroups) == nil then promotionGroups[group.ownerKey] = nil end
         promotionQueue[promotionHead] = nil
         promotionHead = promotionHead + 1
     end
@@ -402,6 +643,7 @@ local function processPromotionQueue()
 
     if stats then
         stats.promotionRuns = stats.promotionRuns + 1
+        stats.maxPromotionPieces = math.max(stats.maxPromotionPieces, #pieces)
         local elapsed = profileClock() - startedAt
         stats.promotionTime = stats.promotionTime + elapsed
         stats.maxPromotionTime = math.max(stats.maxPromotionTime, elapsed)
@@ -419,17 +661,27 @@ function Visuals.QueueRetiredDebris(entity)
     end
 
     local wasEmpty = pendingPromotionPieces == 0
-    local key = entity.gebLib_DebrisBatchGroup or entity
-    local group = promotionGroups[key]
+    local ownerKey = entity.gebLib_DebrisBatchGroup or entity
+    local ownerGroups = promotionGroups[ownerKey]
+    if not ownerGroups then
+        ownerGroups = {}
+        promotionGroups[ownerKey] = ownerGroups
+    end
+    local expiresAt = entity.gebLib_DebrisExpiresAt
+    local groupKey = batchCell(entity:GetPos()) .. "\n" .. tostring(expiresAt)
+    local group = ownerGroups[groupKey]
     if not group then
         group = {
-            key = key,
+            ownerKey = ownerKey,
+            ownerGroups = ownerGroups,
+            groupKey = groupKey,
+            expiresAt = expiresAt,
             shadows = entity.gebLib_DebrisBatchShadows == true,
             entities = {},
             head = 1,
             tail = 0,
         }
-        promotionGroups[key] = group
+        ownerGroups[groupKey] = group
         promotionTail = promotionTail + 1
         promotionQueue[promotionTail] = group
     end
@@ -446,26 +698,53 @@ function Visuals.QueueRetiredDebris(entity)
     return true
 end
 
-local function establishBatchLighting(batch, now, stats)
-    if not batch.lighting or now >= (batch.nextLightingAt or 0) then
+local function nextLightingRefresh(cell, now)
+    local cycle = math.floor((now - cell.phase) / BATCH_LIGHTING_INTERVAL) + 1
+    cell.nextAt = cycle * BATCH_LIGHTING_INTERVAL + cell.phase
+end
+
+local function prepareBatchLighting(batch, now, refreshes, stats)
+    local cell = batch.lightingCell
+    local needsLighting = not cell.lighting
+    local due = needsLighting or now >= (cell.nextAt or 0)
+    if due and (needsLighting or refreshes < MAX_LIGHTING_REFRESHES_PER_HOOK) then
         local startedAt = stats and profileClock()
-        local lighting = batch.lighting or {}
+        local lighting = cell.lighting or {}
         for index = 1, #BATCH_LIGHTING_DIRECTIONS do
-            lighting[index] = render.ComputeLighting(batch.center, BATCH_LIGHTING_DIRECTIONS[index][2])
+            lighting[index] = render.ComputeLighting(
+                cell.position,
+                BATCH_LIGHTING_DIRECTIONS[index][2]
+            )
         end
-        batch.lighting = lighting
-        batch.nextLightingAt = now + BATCH_LIGHTING_INTERVAL
+        cell.lighting = lighting
+        cell.revision = cell.revision + 1
+        nextLightingRefresh(cell, now)
+        refreshes = refreshes + 1
         if stats then
             local elapsed = recordDuration(stats, "lightingTime", startedAt)
             stats.lightingSamples = stats.lightingSamples + 1
             stats.maxLightingTime = math.max(stats.maxLightingTime, elapsed)
         end
+    elseif due then
+        if stats then stats.lightingDeferred = stats.lightingDeferred + 1 end
+    elseif stats then
+        stats.lightingCacheHits = stats.lightingCacheHits + 1
     end
 
+    return cell, refreshes
+end
+
+local function bindBatchLighting(cell, stats)
+    local startedAt = stats and profileClock()
     render.ResetModelLighting(0, 0, 0)
     for index = 1, #BATCH_LIGHTING_DIRECTIONS do
-        local color = batch.lighting[index]
+        local color = cell.lighting[index]
         render.SetModelLighting(BATCH_LIGHTING_DIRECTIONS[index][1], color.x, color.y, color.z)
+    end
+    if stats then
+        local elapsed = recordDuration(stats, "lightingBindTime", startedAt)
+        stats.lightingBinds = stats.lightingBinds + 1
+        stats.maxLightingBindTime = math.max(stats.maxLightingBindTime, elapsed)
     end
 end
 
@@ -478,6 +757,9 @@ if hook and hook.Add then
         local now = CurTime()
         local renderEnabled = Visuals.DebrisRenderEnabled ~= false
         local localLightsCleared = false
+        local lightingRefreshes = 0
+        local boundLightingCell
+        local boundLightingRevision
 
         for index = #debrisBatches, 1, -1 do
             local batch = debrisBatches[index]
@@ -501,20 +783,33 @@ if hook and hook.Add then
                             render.SetLocalModelLights()
                             localLightsCleared = true
                         end
-                        establishBatchLighting(batch, now, stats)
+                        local lightingCell
+                        lightingCell, lightingRefreshes = prepareBatchLighting(
+                            batch,
+                            now,
+                            lightingRefreshes,
+                            stats
+                        )
+                        if boundLightingCell ~= lightingCell
+                            or boundLightingRevision ~= lightingCell.revision
+                        then
+                            bindBatchLighting(lightingCell, stats)
+                            boundLightingCell = lightingCell
+                            boundLightingRevision = lightingCell.revision
+                        end
                         local fading = blend < 1
+                        if fading then
+                            render.OverrideBlend(
+                                true,
+                                BLEND_SRC_ALPHA,
+                                BLEND_ONE_MINUS_SRC_ALPHA,
+                                BLENDFUNC_ADD
+                            )
+                        end
+                        render.SetBlend(blend)
                         for meshIndex = 1, #batch.meshes do
                             local drawing = batch.meshes[meshIndex]
                             render.SetMaterial(drawing.material)
-                            if fading then
-                                render.OverrideBlend(
-                                    true,
-                                    BLEND_SRC_ALPHA,
-                                    BLEND_ONE_MINUS_SRC_ALPHA,
-                                    BLENDFUNC_ADD
-                                )
-                            end
-                            render.SetBlend(blend)
                             drawing.mesh:Draw()
                         end
                         if fading then
@@ -533,6 +828,10 @@ if hook and hook.Add then
         end
 
         if stats then
+            stats.maxLightingRefreshesPerHook = math.max(
+                stats.maxLightingRefreshesPerHook,
+                lightingRefreshes
+            )
             local elapsed = recordDuration(stats, "drawTime", startedAt)
             stats.maxDrawTime = math.max(stats.maxDrawTime, elapsed)
         end
@@ -549,29 +848,42 @@ DebrisRuntime.SetProfile(Profile)
 profileClock = Profile.Now
 recordDuration = Profile.RecordDuration
 local finishImpactProfile = Profile.FinishImpact
-loadInternal("geblib/visuals_wave.lua")(Visuals, Runtime, Surface, Config, Profile)
+loadInternal("geblib/visuals_wave.lua")(
+    Visuals,
+    Runtime,
+    Surface,
+    Config,
+    Profile,
+    queueStaticDebrisPiece
+)
 
-function Visuals.CreateDebrisBurst(materialPath, position, count, options)
+local function prepareBurstPlan(materialPath, position, count, options)
     local profiling = Profile.IsActive()
-    local profileStartedAt = profiling and profileClock()
     local planStartedAt = profiling and profileClock()
     local plan = Config.Burst(materialPath, position, count, options, {gravity = DEFAULT_DEBRIS_GRAVITY})
-    if not plan then return 0 end
+    if not plan then return end
 
-    local burstStats
+    local burstStats = profiling and Profile.Data().bursts
     if profiling then
-        burstStats = Profile.Data().bursts
         burstStats.calls = burstStats.calls + 1
         burstStats.requestedParticles = burstStats.requestedParticles + plan.count
         recordDuration(burstStats, "planTime", planStartedAt)
     end
+    return plan, burstStats
+end
 
-    local emitterStartedAt = profiling and profileClock()
-    local emitter = ParticleEmitter(plan.position)
-    if profiling then recordDuration(burstStats, "emitterTime", emitterStartedAt) end
+local function emitBurstPlans(plans, emitterPosition, burstStats, profileStartedAt)
+    if #plans == 0 then return 0 end
+
+    local emitterStartedAt = burstStats and profileClock()
+    local emitter = ParticleEmitter(emitterPosition)
+    if burstStats then
+        recordDuration(burstStats, "emitterTime", emitterStartedAt)
+        burstStats.emitterGroups = burstStats.emitterGroups + 1
+    end
     if not emitter then
-        if profiling then
-            burstStats.failed = burstStats.failed + 1
+        if burstStats then
+            burstStats.failed = burstStats.failed + #plans
             local elapsed = recordDuration(burstStats, "totalTime", profileStartedAt)
             if elapsed > burstStats.maxTime then burstStats.maxTime = elapsed end
         end
@@ -580,52 +892,67 @@ function Visuals.CreateDebrisBurst(materialPath, position, count, options)
 
     local emitted = 0
 
-    for index = 1, plan.count do
-        local addStartedAt = profiling and profileClock()
-        local particle = emitter:Add(plan.materialPath, plan.position)
-        if profiling then recordDuration(burstStats, "addTime", addStartedAt) end
-        if particle then
-            local velocityStartedAt = profiling and profileClock()
-            local particleVelocity
-            if plan.direction then
-                particleVelocity = plan.direction * plan.speed
-                    + VectorRand(-plan.speed * plan.spread, plan.speed * plan.spread)
-            else
-                particleVelocity = VectorRand(-plan.speed, plan.speed)
-            end
-            if plan.velocity then particleVelocity:Add(plan.velocity) end
-            if profiling then recordDuration(burstStats, "velocityTime", velocityStartedAt) end
+    for planIndex = 1, #plans do
+        local plan = plans[planIndex]
+        local layerStartedAt = plan.profileStats and profileClock()
+        for index = 1, plan.count do
+            local addStartedAt = burstStats and profileClock()
+            local particle = emitter:Add(plan.materialPath, plan.position)
+            if burstStats then recordDuration(burstStats, "addTime", addStartedAt) end
+            if particle then
+                local velocityStartedAt = burstStats and profileClock()
+                local particleVelocity
+                if plan.direction then
+                    particleVelocity = plan.direction * plan.speed
+                        + VectorRand(-plan.speed * plan.spread, plan.speed * plan.spread)
+                else
+                    particleVelocity = VectorRand(-plan.speed, plan.speed)
+                end
+                if plan.velocity then particleVelocity:Add(plan.velocity) end
+                if burstStats then recordDuration(burstStats, "velocityTime", velocityStartedAt) end
 
-            local setupStartedAt = profiling and profileClock()
-            particle:SetDieTime(plan.lifetime)
-            particle:SetStartAlpha(plan.alpha)
-            particle:SetEndAlpha(0)
-            particle:SetStartSize(plan.size)
-            particle:SetEndSize(plan.endSize)
-            particle:SetColor(plan.red, plan.green, plan.blue)
-            particle:SetVelocity(particleVelocity)
-            particle:SetGravity(plan.gravity)
-            particle:SetCollide(plan.collide)
-            particle:SetLighting(plan.lighting)
-            particle:SetRoll(math.Rand(-math.pi, math.pi))
-            particle:SetRollDelta(math.Rand(-plan.spin, plan.spin))
-            if plan.collide then particle:SetBounce(plan.bounce) end
-            if profiling then recordDuration(burstStats, "setupTime", setupStartedAt) end
-            emitted = emitted + 1
-        elseif profiling then
-            burstStats.failedParticles = burstStats.failedParticles + 1
+                local setupStartedAt = burstStats and profileClock()
+                particle:SetDieTime(plan.lifetime)
+                particle:SetStartAlpha(plan.alpha)
+                particle:SetEndAlpha(0)
+                particle:SetStartSize(plan.size)
+                particle:SetEndSize(plan.endSize)
+                particle:SetColor(plan.red, plan.green, plan.blue)
+                particle:SetVelocity(particleVelocity)
+                particle:SetGravity(plan.gravity)
+                particle:SetCollide(plan.collide)
+                particle:SetLighting(plan.lighting)
+                particle:SetRoll(math.Rand(-math.pi, math.pi))
+                particle:SetRollDelta(math.Rand(-plan.spin, plan.spin))
+                if plan.collide then particle:SetBounce(plan.bounce) end
+                if burstStats then recordDuration(burstStats, "setupTime", setupStartedAt) end
+                emitted = emitted + 1
+            elseif burstStats then
+                burstStats.failedParticles = burstStats.failedParticles + 1
+            end
+        end
+        if plan.profileStats then
+            recordDuration(plan.profileStats, plan.profileKey, layerStartedAt)
         end
     end
 
-    local finishStartedAt = profiling and profileClock()
+    local finishStartedAt = burstStats and profileClock()
     emitter:Finish()
-    if profiling then
+    if burstStats then
         recordDuration(burstStats, "finishTime", finishStartedAt)
         burstStats.particles = burstStats.particles + emitted
         local elapsed = recordDuration(burstStats, "totalTime", profileStartedAt)
         if elapsed > burstStats.maxTime then burstStats.maxTime = elapsed end
     end
     return emitted
+end
+
+function Visuals.CreateDebrisBurst(materialPath, position, count, options)
+    local profiling = Profile.IsActive()
+    local profileStartedAt = profiling and profileClock()
+    local plan, burstStats = prepareBurstPlan(materialPath, position, count, options)
+    if not plan then return 0 end
+    return emitBurstPlans({plan}, plan.position, burstStats, profileStartedAt)
 end
 
 local normalizeImpactMaterial = Surface.NormalizeMaterial
@@ -714,10 +1041,28 @@ function Visuals.CreateWaterDebris(position, normal, strength, options)
     direction = direction:GetNormalized()
     if profiling then recordDuration(waterStats, "directionTime", directionStartedAt) end
     local spawned = 0
+    local burstPlans = {}
+    local burstStats
+    local burstStartedAt = profiling and profileClock()
+
+    local function addWaterBurst(materialPath, particlePosition, count, burstOptions, profileKey)
+        local layerStartedAt = profiling and profileClock()
+        local burstPlan, currentStats = prepareBurstPlan(
+            materialPath,
+            particlePosition,
+            count,
+            burstOptions
+        )
+        if profiling then recordDuration(waterStats, profileKey, layerStartedAt) end
+        if not burstPlan then return end
+        burstPlan.profileStats = profiling and waterStats or nil
+        burstPlan.profileKey = profileKey
+        burstPlans[#burstPlans + 1] = burstPlan
+        burstStats = currentStats or burstStats
+    end
 
     if sprayCount > 0 then
-        local sprayStartedAt = profiling and profileClock()
-        spawned = spawned + Visuals.CreateDebrisBurst(
+        addWaterBurst(
             options.sprayMaterial or "effects/splash4",
             position + normal * 2,
             sprayCount,
@@ -734,14 +1079,13 @@ function Visuals.CreateWaterDebris(position, normal, strength, options)
                 collide = false,
                 lighting = false,
                 color = color,
-            }
+            },
+            "sprayTime"
         )
-        if profiling then recordDuration(waterStats, "sprayTime", sprayStartedAt) end
     end
 
     if dropletCount > 0 then
-        local dropletStartedAt = profiling and profileClock()
-        spawned = spawned + Visuals.CreateDebrisBurst(
+        addWaterBurst(
             options.dropletMaterial or "particle/water/waterdrop_001a",
             position + normal * 3,
             dropletCount,
@@ -758,14 +1102,13 @@ function Visuals.CreateWaterDebris(position, normal, strength, options)
                 collide = false,
                 lighting = false,
                 color = color,
-            }
+            },
+            "dropletTime"
         )
-        if profiling then recordDuration(waterStats, "dropletTime", dropletStartedAt) end
     end
 
     if mistCount > 0 and options.mist ~= false and options.smoke ~= false then
-        local mistStartedAt = profiling and profileClock()
-        spawned = spawned + Visuals.CreateDebrisBurst(
+        addWaterBurst(
             options.mistMaterial or "particle/particle_smokegrenade",
             position + normal * 5,
             mistCount,
@@ -782,9 +1125,13 @@ function Visuals.CreateWaterDebris(position, normal, strength, options)
                 collide = false,
                 lighting = false,
                 color = options.mistColor or DEFAULT_WATER_MIST_COLOR,
-            }
+            },
+            "mistTime"
         )
-        if profiling then recordDuration(waterStats, "mistTime", mistStartedAt) end
+    end
+
+    if #burstPlans > 0 then
+        spawned = spawned + emitBurstPlans(burstPlans, position, burstStats, burstStartedAt)
     end
 
     if options.effects ~= false then

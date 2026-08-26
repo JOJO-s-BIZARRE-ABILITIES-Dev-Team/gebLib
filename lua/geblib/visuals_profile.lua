@@ -45,6 +45,7 @@ local function createDebrisProfile(Visuals, getDebris)
             bursts = {
                 calls = 0, requestedParticles = 0, particles = 0,
                 failed = 0, failedParticles = 0,
+                emitterGroups = 0,
                 totalTime = 0, maxTime = 0, planTime = 0,
                 emitterTime = 0, addTime = 0, velocityTime = 0,
                 setupTime = 0, finishTime = 0,
@@ -66,10 +67,12 @@ local function createDebrisProfile(Visuals, getDebris)
                 callbackCalls = 0, callbackTime = 0,
                 modelPathTime = 0, waterSteps = 0, waterTime = 0,
                 propRequests = 0, props = 0,
+                promotableProps = 0,
                 propCreateTime = 0, propSetupTime = 0,
                 propTransformTime = 0, propSpawnTime = 0,
                 propActivateTime = 0, propPhysicsTime = 0,
                 modelRequests = 0, models = 0,
+                batchedModels = 0,
                 modelCreateTime = 0, modelSetupTime = 0,
             },
             lifecycle = {
@@ -90,16 +93,22 @@ local function createDebrisProfile(Visuals, getDebris)
             batching = {
                 created = 0, expired = 0, failures = 0, fallbackPieces = 0,
                 pieces = 0, meshes = 0, vertices = 0, shadowedPieces = 0,
+                singleMaterialBuilds = 0,
                 cacheHits = 0, cacheMisses = 0, sourceTime = 0,
                 transformTime = 0, maxTransformTime = 0,
                 buildTime = 0, maxBuildTime = 0,
                 totalTime = 0, maxTotalTime = 0,
                 lightingSamples = 0, lightingTime = 0, maxLightingTime = 0,
+                lightingCacheHits = 0, lightingDeferred = 0,
+                lightingBinds = 0, lightingBindTime = 0, maxLightingBindTime = 0,
+                maxLightingRefreshesPerHook = 0,
                 renderHooks = 0, drawnBatches = 0, culledBatches = 0, drawCalls = 0,
                 drawTime = 0, maxDrawTime = 0,
                 promotionsQueued = 0, promotionRuns = 0,
                 promotedPieces = 0, promotionSkipped = 0, promotionFailed = 0,
-                promotionTime = 0, maxPromotionTime = 0,
+                promotionTime = 0, maxPromotionTime = 0, maxPromotionPieces = 0,
+                queuedPieces = 0, queueFlushes = 0, queuedBuilds = 0,
+                queuedFallbackPieces = 0,
             },
             frames = {
                 count = 0, totalTime = 0, minTime = math.huge, maxTime = 0,
@@ -518,6 +527,7 @@ local function createDebrisProfile(Visuals, getDebris)
         profilePrint(
             "particle bursts: " .. bursts.calls .. " calls, " .. bursts.particles
                 .. "/" .. bursts.requestedParticles .. " particles, "
+                .. bursts.emitterGroups .. " emitters, "
                 .. bursts.failed .. " emitter failures, " .. bursts.failedParticles
                 .. " particle failures, "
                 .. milliseconds(bursts.totalTime / math.max(bursts.calls, 1))
@@ -587,6 +597,7 @@ local function createDebrisProfile(Visuals, getDebris)
             )
             profilePrint(
                 "wave props: " .. waves.props .. "/" .. waves.propRequests
+                    .. " (" .. waves.promotableProps .. " promotable)"
                     .. ", per request create " .. milliseconds(waves.propCreateTime / propDivisor)
                     .. ", setup " .. milliseconds(waves.propSetupTime / propDivisor)
                     .. ", transform " .. milliseconds(waves.propTransformTime / propDivisor)
@@ -596,6 +607,7 @@ local function createDebrisProfile(Visuals, getDebris)
             )
             profilePrint(
                 "wave models: " .. waves.models .. "/" .. waves.modelRequests
+                    .. " (" .. waves.batchedModels .. " frame-batched)"
                     .. ", per request create " .. milliseconds(waves.modelCreateTime / modelDivisor)
                     .. ", setup " .. milliseconds(waves.modelSetupTime / modelDivisor)
                     .. "; callbacks " .. waves.callbackCalls .. ", "
@@ -645,19 +657,29 @@ local function createDebrisProfile(Visuals, getDebris)
                 .. " skipped, " .. batching.promotionFailed .. " failed, "
                 .. (batchState.pendingPromotions or 0) .. " pending; "
                 .. milliseconds(batching.promotionTime / math.max(batching.promotionRuns, 1))
-                .. " per run, " .. milliseconds(batching.maxPromotionTime) .. " maximum"
+                .. " per run, " .. milliseconds(batching.maxPromotionTime) .. " maximum; "
+                .. batching.maxPromotionPieces .. "/" .. (batchState.promotionBudget or 0)
+                .. " maximum pieces per run"
         )
         if batching.created > 0 or batching.failures > 0 or batchState.pieces > 0 then
             profilePrint(
                 "static batching: " .. batchState.batches .. " active batches, "
                     .. batchState.pieces .. " active pieces; " .. batching.created .. " created, "
                     .. batching.expired .. " expired, " .. batching.failures .. " failures, "
-                    .. batching.fallbackPieces .. " fallback pieces"
+                    .. batching.fallbackPieces .. " immediate fallback pieces; "
+                    .. (batchState.pendingPieces or 0) .. " frame-queued, "
+                    .. (batchState.lightingCells or 0) .. " lighting cells"
+            )
+            profilePrint(
+                "static frame batching: " .. batching.queuedPieces .. " pieces queued, "
+                    .. batching.queueFlushes .. " flushes, " .. batching.queuedBuilds
+                    .. " builds, " .. batching.queuedFallbackPieces .. " fallback pieces"
             )
             profilePrint(
                 "static batch creation: " .. batching.pieces .. " pieces, " .. batching.meshes
                     .. " meshes, " .. batching.vertices .. " vertices, " .. batching.shadowedPieces
-                    .. " pieces requested shadows; source " .. milliseconds(batching.sourceTime)
+                    .. " pieces requested shadows, " .. batching.singleMaterialBuilds
+                    .. " one-material builds; source " .. milliseconds(batching.sourceTime)
                     .. ", transform " .. milliseconds(batching.transformTime)
                     .. " total, " .. milliseconds(batching.maxTransformTime) .. " maximum"
                     .. ", build " .. milliseconds(batching.buildTime)
@@ -674,7 +696,15 @@ local function createDebrisProfile(Visuals, getDebris)
                     .. " per render hook, " .. milliseconds(batching.maxDrawTime) .. " maximum; lighting "
                     .. batching.lightingSamples .. " samples, "
                     .. milliseconds(batching.lightingTime / math.max(batching.lightingSamples, 1))
-                    .. " average, " .. milliseconds(batching.maxLightingTime) .. " maximum"
+                    .. " average, " .. milliseconds(batching.maxLightingTime) .. " maximum, "
+                    .. batching.lightingCacheHits .. " cache hits, "
+                    .. batching.lightingDeferred .. " deferred, "
+                    .. batching.maxLightingRefreshesPerHook .. " max refreshes per hook"
+            )
+            profilePrint(
+                "static lighting binding: " .. batching.lightingBinds .. " binds, "
+                    .. milliseconds(batching.lightingBindTime / math.max(batching.lightingBinds, 1))
+                    .. " average, " .. milliseconds(batching.maxLightingBindTime) .. " maximum"
             )
         end
 

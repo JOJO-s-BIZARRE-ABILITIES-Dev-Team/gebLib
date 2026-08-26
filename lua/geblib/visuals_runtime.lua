@@ -143,13 +143,13 @@ local function createVisualRuntime(Visuals)
             if not IsValid(entity) then
                 removePhysicalAt(physicsScanIndex)
                 if stats then stats.invalid = stats.invalid + 1 end
+            elseif now - (entity.gebLib_DebrisPhysicsCreatedAt or now) < PHYSICS_MIN_AGE then
+                physicsScanIndex = physicsScanIndex + 1
             else
                 local physics = entity:GetPhysicsObject()
                 if not IsValid(physics) then
                     removePhysicalAt(physicsScanIndex)
                     if stats then stats.missing = stats.missing + 1 end
-                elseif now - (entity.gebLib_DebrisPhysicsCreatedAt or now) < PHYSICS_MIN_AGE then
-                    physicsScanIndex = physicsScanIndex + 1
                 elseif physics.IsAsleep and physics:IsAsleep() then
                     entity.gebLib_DebrisSleepChecks = (entity.gebLib_DebrisSleepChecks or 0) + 1
                     if stats then stats.sleepingChecks = stats.sleepingChecks + 1 end
@@ -506,7 +506,9 @@ local function createVisualRuntime(Visuals)
 
     function Visuals.GetDebrisCount()
         local batchState = Visuals.GetDebrisBatchState and Visuals.GetDebrisBatchState()
-        return #heap + (batchState and batchState.pieces or 0)
+        return #heap
+            + (batchState and batchState.pieces or 0)
+            + (batchState and batchState.pendingPieces or 0)
     end
 
     function Visuals.ClearDebris()

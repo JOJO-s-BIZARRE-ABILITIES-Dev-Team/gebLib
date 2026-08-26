@@ -1,4 +1,4 @@
-local function installDebrisWave(Visuals, Runtime, Surface, Config, Profile)
+local function installDebrisWave(Visuals, Runtime, Surface, Config, Profile, queueStaticDebrisPiece)
     local previous = gebLib._VisualsWaveState
     if previous then
         Runtime.Unregister(previous.scheduler)
@@ -315,13 +315,19 @@ local function spawnDebrisWaveStep(wave, step)
                 recordDuration(stats, "propPhysicsTime", physicsStartedAt)
                 recordDuration(stats, "propSetupTime", propSetupStartedAt)
             end
-            Visuals.RefreshDebrisPhysics(prop)
-
             wave.Spawned = wave.Spawned + 1
             if not waveCallback(propConfig.setup, wave, "prop setup callback", prop, step) then
                 finishWaveStepProfile(stats, stepStartedAt, wave, spawnedBefore, false)
                 return
             end
+            if not surfaceColor and type(propConfig.setup) ~= "function" then
+                prop.gebLib_DebrisPromoteWhenSettled = true
+                prop.gebLib_DebrisBatchGroup = wave
+                prop.gebLib_DebrisBatchShadows = propConfig.shadows ~= false
+                prop.gebLib_DebrisBatchMaterial = material
+                if stats then stats.promotableProps = stats.promotableProps + 1 end
+            end
+            Visuals.RefreshDebrisPhysics(prop)
         end
     end
 
@@ -331,27 +337,48 @@ local function spawnDebrisWaveStep(wave, step)
         local modelPathStartedAt = stats and profileClock()
         local modelPath = waveModelPath(wave, step, false, materialType)
         if stats then recordDuration(stats, "modelPathTime", modelPathStartedAt) end
-        local modelCreateStartedAt = stats and profileClock()
-        local model = Visuals.CreateDebris(
-            modelPath,
-            false,
-            wave.Lifetime,
-            wave.PreserveCount,
-            material
-        )
-        if stats then recordDuration(stats, "modelCreateTime", modelCreateStartedAt) end
-        if IsValid(model) then
-            if stats then stats.models = stats.models + 1 end
-            local modelSetupStartedAt = stats and profileClock()
-            if surfaceColor then model:SetColor(surfaceColor) end
-            model:SetPos(position + (modelConfig.offset or vector_origin))
-            model:SetAngles(waveAngle(modelConfig, wave, step))
-            model:SetModelScale(waveScale(modelConfig), 0)
-            if stats then recordDuration(stats, "modelSetupTime", modelSetupStartedAt) end
+        local modelPosition = position + (modelConfig.offset or vector_origin)
+        local modelAngles = waveAngle(modelConfig, wave, step)
+        local modelScale = waveScale(modelConfig)
+        local queued = not surfaceColor
+            and type(modelConfig.setup) ~= "function"
+            and queueStaticDebrisPiece({
+                modelPath = modelPath,
+                position = modelPosition,
+                angles = modelAngles,
+                scale = modelScale,
+                material = material,
+            }, wave.Lifetime, modelConfig.shadows ~= false, wave.PreserveCount)
+        if queued then
+            if stats then
+                stats.models = stats.models + 1
+                stats.batchedModels = stats.batchedModels + 1
+            end
             wave.Spawned = wave.Spawned + 1
-            if not waveCallback(modelConfig.setup, wave, "model setup callback", model, step) then
-                finishWaveStepProfile(stats, stepStartedAt, wave, spawnedBefore, false)
-                return
+        else
+            local modelCreateStartedAt = stats and profileClock()
+            local model = Visuals.CreateDebris(
+                modelPath,
+                false,
+                wave.Lifetime,
+                wave.PreserveCount,
+                material,
+                false
+            )
+            if stats then recordDuration(stats, "modelCreateTime", modelCreateStartedAt) end
+            if IsValid(model) then
+                if stats then stats.models = stats.models + 1 end
+                local modelSetupStartedAt = stats and profileClock()
+                if surfaceColor then model:SetColor(surfaceColor) end
+                model:SetPos(modelPosition)
+                model:SetAngles(modelAngles)
+                model:SetModelScale(modelScale, 0)
+                if stats then recordDuration(stats, "modelSetupTime", modelSetupStartedAt) end
+                wave.Spawned = wave.Spawned + 1
+                if not waveCallback(modelConfig.setup, wave, "model setup callback", model, step) then
+                    finishWaveStepProfile(stats, stepStartedAt, wave, spawnedBefore, false)
+                    return
+                end
             end
         end
     end
