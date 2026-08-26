@@ -238,6 +238,66 @@ end)
 camera:Play()
 ```
 
+## Client composition
+
+Register camera effects independently. Modifiers run from lower to higher priority and edit one shared view:
+
+```lua
+gebLib.CameraModifiers.Register("myaddon.recoil", 200, function(player, view)
+    view.angles.p = view.angles.p - 2
+    return true
+end)
+```
+
+Register additive player-bone control without owning another `UpdateAnimation` hook:
+
+```lua
+gebLib.BoneControllers.Register("myaddon.aim", {
+    Bone = "ValveBiped.Bip01_Spine",
+    Speed = 180,
+    IsActive = function(player) return player:Alive() end,
+    GetTarget = function(player) return player:EyeAngles().p * 0.5, 0, 0 end,
+})
+```
+
+`gebLib.PlayerReplica` creates and synchronizes clientside player copies. Use `SyncAppearance` for model, skin, bodygroups, color, and scale; `SyncPose` for sequence, cycle, pose parameters, and registered bone transforms; and `CaptureBoneMatrices` plus `ApplyBoneMatrices` for frozen afterimages.
+
+## Reusable visual systems
+
+Project static or animated decals onto the world or moving entities:
+
+```lua
+gebLib.Visuals.RegisterProjectedDecalAnimation("myaddon.crack", {
+    texture = "decals/myaddon_crack_anim",
+    frameCount = 7,
+    duration = 0.2,
+    poolSize = 16,
+})
+
+gebLib.Visuals.ProjectAnimatedDecal("myaddon.crack", entity, hitPos, hitNormal, 1)
+```
+
+Acquire a keyed emitter for repeated effects. gebLib reuses it and finishes it after the idle window once no particles remain:
+
+```lua
+local emitter = gebLib.Visuals.AcquireParticleEmitter("myaddon.sparks", position, false, 1)
+```
+
+`gebLib.Surface.Describe(surfaceProp)` returns a cached Surface Description with `material`, `impactHardSound`, `impactSoftSound`, `strainSound`, `breakSound`, and `bulletImpactSound`. Treat the returned table as immutable.
+
+Play or extend the shared impact-frame system:
+
+```lua
+gebLib.ImpactFrames.Play("heavy", {
+    AnchorPosition = hitPos,
+    WorldDirection = hitDirection,
+    SubjectEntity = attacker,
+    TargetEntity = victim,
+})
+```
+
+Use `RegisterSequence` and `RegisterPreset` to define addon-specific styles. Clients control the effect with `geblib_impact_frames` and its custom shader with `geblib_impact_frames_shader`.
+
 ## Other helpers
 
 ```lua

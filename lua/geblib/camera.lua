@@ -179,30 +179,24 @@ function Camera:Play(simulate)
 
 	Runtime.Register(self, "Cinematic Camera " .. tostring(self), stepCamera, failCamera, failCamera)
 
-    if CLIENT and not simulate then
-        hook.Add("CalcView", self.ThinkName, function(ply, pos, angles, fov)
-            if not self.Playing or not self:IsValid() then self:Stop() return end
+	if CLIENT and not simulate then
+		gebLib.CameraModifiers.Register(self.ThinkName, 10000, function(ply, view)
+			if ply ~= self.Player then return false end
+			if not self.Playing or not self:IsValid() then self:Stop() return false end
 
-            updateCameraFrame(self)
-            local view = {
-                origin = pos,
-                angles = angles,
-                fov = fov,
-                drawviewer = true
-            }
+			updateCameraFrame(self)
+			view.drawviewer = true
 
-            if not self:RunThink() or not self.Playing then return view end
-            if not runCameraEvents(self, ply, pos, angles, fov, view) then return view end
+			if not self:RunThink() or not self.Playing then return true end
+			if not runCameraEvents(self, ply, view.origin, view.angles, view.fov, view) then return true end
 
-            if self.CurFrame >= self.MaxFrames then
-                self:Stop()
-            end
-            
-            self.LastPos = view.origin
-            self.LastAng = view.angles
-            return view
-        end)
-    end
+			if self.CurFrame >= self.MaxFrames then self:Stop() end
+
+			self.LastPos = view.origin
+			self.LastAng = view.angles
+			return true
+		end)
+	end
 
 	return true
 end
@@ -288,13 +282,12 @@ function Camera:AddFakePlayerCopy()
 	self.OldPos = oldPos
 	self.OldAng = angles
 
-	local copy = ClientsideModel(ply:GetModel())
+	local copy = gebLib.PlayerReplica.Create(ply, RENDERGROUP_OPAQUE, true)
 	if not IsValid(copy) then return false end
 
+    copy:SetNoDraw(false)
     copy:SetPos(oldPos)
     copy:SetAngles(angles)
-	copy:DrawShadow(true)
-    copy:SetSkin(ply:GetSkin())
     copy:SetPlaybackRate(1)
 	copy:SetSequence(ply:GetSequence())
 	copy.RenderOverride = RenderOverride
@@ -336,8 +329,8 @@ function Camera:RemoveDefaultHooks()
 	hook.Remove("DrawOverlay", self.HookName .. "_BlackBars")
 	hook.Remove("HUDShouldDraw", self.HookName .. "_NoHud")
 
-	if self.ThinkName then
-		hook.Remove("CalcView", self.ThinkName)
+	if self.ThinkName and gebLib.CameraModifiers then
+		gebLib.CameraModifiers.Remove(self.ThinkName)
 	end
 end
 

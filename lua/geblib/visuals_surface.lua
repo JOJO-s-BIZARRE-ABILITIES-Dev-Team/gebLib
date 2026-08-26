@@ -1,4 +1,5 @@
-local Surface = {}
+gebLib.Surface = gebLib.Surface or {}
+local Surface = gebLib.Surface
 
 local ROCK_MODELS = {
     "models/props_debris/physics_debris_rock1.mdl",
@@ -62,6 +63,7 @@ if SERVER and util and util.PrecacheModel then
 end
 
 local cachedMaterials = {}
+local cachedDescriptions = {}
 local traceResult = {}
 local traceData = {
     mask = MASK_VISIBLE,
@@ -74,6 +76,25 @@ function Surface.NormalizeMaterial(materialType)
     if materialType == MAT_BLOODYFLESH then return MAT_FLESH end
     if materialType == MAT_GRATE or materialType == MAT_COMPUTER then return MAT_METAL end
     return materialType
+end
+
+function Surface.Describe(surfaceProp)
+    surfaceProp = math.max(math.floor(tonumber(surfaceProp) or 0), 0)
+    local cached = cachedDescriptions[surfaceProp]
+    if cached then return cached end
+
+    local data = util.GetSurfaceData(surfaceProp) or {}
+    cached = {
+        surfaceProp = surfaceProp,
+        material = Surface.NormalizeMaterial(data.material or MAT_CONCRETE),
+        impactHardSound = data.impactHardSound,
+        impactSoftSound = data.impactSoftSound,
+        strainSound = data.strainSound,
+        breakSound = data.breakSound,
+        bulletImpactSound = data.bulletImpactSound,
+    }
+    cachedDescriptions[surfaceProp] = cached
+    return cached
 end
 
 function Surface.Models(materialType)

@@ -13,6 +13,15 @@ The duration, level, source, and timing state of one Status Effect Definition on
 **Cinematic Camera**:
 A player-focused frame timeline that controls view presentation.
 
+**Camera Modifier**:
+A named client callback that composes one part of the active player view in deterministic priority order.
+
+**Bone Controller**:
+A named client rule that contributes an additive target rotation to one player bone.
+
+**Player Replica**:
+A clientside model that mirrors a player's appearance, animation pose, and optionally captured bone matrices.
+
 **Transient Visual**:
 A client-only debris model or decal with a finite lifetime.
 
@@ -24,6 +33,18 @@ The internal mutation-safe frame loop shared by independently owned Cinematic Ca
 
 **Transient Visual Plan**:
 An owned, normalized set of settings prepared once before a Transient Visual is emitted.
+
+**Projected Decal Animation**:
+A registered texture sequence projected onto world or entity geometry through a bounded reusable material pool.
+
+**Particle Emitter Lease**:
+A keyed request for a shared client particle emitter that gebLib retires after its particles and idle window are exhausted.
+
+**Surface Description**:
+An immutable cached view of a Source surface property's normalized material and common impact sounds.
+
+**Impact Frame**:
+A short clientside post-process sequence selected from a registered preset and optionally anchored to entities or a world position.
 
 **Network Message**:
 A named, directional packet with one shared ordered schema and one receiving callback.
@@ -42,10 +63,18 @@ Opt-in observations about packet and record size, frequency, recipients, repeate
 - A **Status Effect Definition** may produce one **Applied Status Effect** per living entity.
 - An **Applied Status Effect** belongs to exactly one living entity.
 - A **Cinematic Camera** owns its lifecycle independently.
+- A **Cinematic Camera** contributes its view through a high-priority **Camera Modifier**.
+- Multiple **Camera Modifiers** compose one view from lower to higher priority.
+- Multiple **Bone Controllers** may contribute additive rotations to the same player bone.
+- A **Player Replica** mirrors a valid source player but owns its own position and drawing lifecycle.
 - A **Transient Visual** exists only on the client that creates it.
 - A **Debris Wave** owns its emission progress and may be paused, resumed, or cancelled independently.
 - The **Frame Dispatcher** advances lifecycles without owning their domain rules.
 - A **Debris Wave** executes one **Transient Visual Plan** that cannot be changed through its caller's settings table.
+- A **Projected Decal Animation** owns its material pool and cancels stale frame timers when a pool slot is reused.
+- A **Particle Emitter Lease** is owned by its key and may be acquired repeatedly by one visual stream.
+- A **Surface Description** belongs to one Source surface property identifier.
+- An **Impact Frame** executes one owned snapshot of a registered preset and sequence.
 - A **Network Message** is either server-to-client or client-to-server.
 - A **Network Message** owns an ordered list of **Network Codecs**.
 - A **Network Batch** belongs to one batch-enabled Network Message and preserves record order.

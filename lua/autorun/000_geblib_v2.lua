@@ -1,7 +1,7 @@
 -- Developed by T0M and jopster1336
 
 gebLib = gebLib or {}
-gebLib.Version = "3.0.1"
+gebLib.Version = "3.1.0"
 gebLib.Loaded = false
 
 if game and game.AddParticles then game.AddParticles("particles/geblib_debris.pcf") end
@@ -38,6 +38,11 @@ local sharedFiles = {
 local clientFiles = {
     "geblib/drawing.lua",
     "geblib/visuals.lua",
+    "geblib/bone_controllers.lua",
+    "geblib/player_replica.lua",
+    "geblib/camera_modifiers.lua",
+    "geblib/particle_emitters.lua",
+    "geblib/impact_frames.lua",
 }
 
 local clientSupportFiles = {
