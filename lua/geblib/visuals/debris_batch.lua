@@ -7,7 +7,6 @@ local function installDebrisBatch(Visuals, Runtime, Surface, Profile)
     local MESH_WARMUP_HOOK_NAME = "gebLib.Visuals.DebrisMeshWarmup"
     local MAX_BATCH_VERTICES = 60000
     local MAX_PROMOTION_PIECES_PER_FRAME = 64
-    local BATCH_TRIANGLE_ORDER = {0, 2, 1}
     local BATCH_CELL_SIZE = 512
     local BATCH_EXPIRY_BUCKET = 0.25
     local BATCH_QUEUE_MAX_DELAY = 0.05
@@ -343,7 +342,7 @@ local function installDebrisBatch(Visuals, Runtime, Surface, Profile)
                             local scale = piece.scale
                             for triangleIndex = entry.firstVertex, entry.lastVertex, 3 do
                                 for corner = 1, 3 do
-                                    local vertex = entry.triangles[triangleIndex + BATCH_TRIANGLE_ORDER[corner]]
+                                    local vertex = entry.triangles[triangleIndex + corner - 1]
                                     local sourcePosition = vertex.pos
                                     local localX = sourcePosition.x * scale
                                     local localY = sourcePosition.y * scale
