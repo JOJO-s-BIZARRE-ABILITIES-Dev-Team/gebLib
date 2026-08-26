@@ -1,5 +1,6 @@
 local function installDecalAdapter(Visuals)
-    local projectedAnimations = {}
+    local projectedAnimations = Visuals._ProjectedDecalAnimations or {}
+    Visuals._ProjectedDecalAnimations = projectedAnimations
 
     local function validSurface(entity)
         return entity == game.GetWorld() or IsValid(entity)
