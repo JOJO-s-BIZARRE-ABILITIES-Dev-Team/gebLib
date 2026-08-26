@@ -27,7 +27,6 @@ local sharedFiles = {
     "geblib/runtime.lua",
     "geblib/math.lua",
     "geblib/combat.lua",
-    "geblib/net_profile.lua",
     "geblib/net.lua",
     "geblib/entities.lua",
     "geblib/camera.lua",
@@ -52,7 +51,9 @@ local clientFiles = {
     "geblib/impact_frames.lua",
 }
 
-local clientSupportFiles = {
+local supportFiles = {
+    "geblib/net_codecs.lua",
+    "geblib/net_profile.lua",
     "geblib/visuals_surface.lua",
     "geblib/visuals_config.lua",
     "geblib/visuals_runtime.lua",
@@ -70,7 +71,7 @@ if SERVER then
         AddCSLuaFile(path)
     end
 
-    for _, path in ipairs(clientSupportFiles) do
+    for _, path in ipairs(supportFiles) do
         AddCSLuaFile(path)
     end
 end
