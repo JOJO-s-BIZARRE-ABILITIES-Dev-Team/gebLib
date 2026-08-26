@@ -383,7 +383,7 @@ Debris is client-only and capped at 512 active entities by default. Creating ano
 
 Use `CreateDebrisBurst` for hundreds or thousands of cosmetic fragments. It creates one engine particle emitter instead of one entity per fragment and returns the number emitted. It accepts a material rather than a model. World collision is enabled by default; pass `collide = false` for the highest throughput.
 
-`lifetime`, `size`, `endSize`, and `speed` retain their fixed-value behavior. Add `Min` and `Max`, such as `lifetimeMin` and `lifetimeMax`, to randomize one of those values. Other optional settings are `spin`, `velocity`, `direction`, `spread`, `gravity`, `bounce`, `color`, `collide`, `lighting`, `airResistance`, `length`, `endLength`, and `maxActiveParticles`. Pass an existing particle emitter as `emitter` to share its active-particle limit and lifecycle.
+`lifetime`, `size`, `endSize`, `speed`, and `alpha` retain their fixed-value behavior. Add `Min` and `Max`, such as `lifetimeMin` and `lifetimeMax`, to randomize one of those values. Other optional settings are `spin`, `velocity`, `direction`, `spread`, `gravity`, `bounce`, `color`, `collide`, `collideChance`, `lighting`, `airResistance`, `length`, `endLength`, and `maxActiveParticles`. Pass an existing particle emitter as `emitter` to share its active-particle limit and lifecycle.
 
 Create an expanding shockwave without a Lua draw hook:
 

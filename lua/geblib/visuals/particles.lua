@@ -53,6 +53,9 @@ local function installVisualParticles(Visuals, Profile)
         local lifetimeMin, lifetimeMax = numberRange(options, "lifetime", 5, 0.01)
         local sizeMin, sizeMax = numberRange(options, "size", 4, 0)
         local speedMin, speedMax = numberRange(options, "speed", 250, 0)
+        local alphaMin, alphaMax = numberRange(options, "alpha", color.a or 255, 0)
+        alphaMin = math.min(alphaMin, 255)
+        alphaMax = math.min(alphaMax, 255)
         local endSizeTracksStart = options.endSize == nil
             and options.endSizeMin == nil
             and options.endSizeMax == nil
@@ -89,13 +92,15 @@ local function installVisualParticles(Visuals, Profile)
             red = color.r or 255,
             green = color.g or 255,
             blue = color.b or 255,
-            alpha = color.a or 255,
+            alphaMin = alphaMin,
+            alphaMax = alphaMax,
             airResistance = tonumber(options.airResistance),
             length = tonumber(options.length),
             endLength = tonumber(options.endLength),
             maxActiveParticles = maximumActive,
             emitter = options.emitter,
             use3D = options.use3D == true,
+            collideChance = math.max(math.min(tonumber(options.collideChance) or 1, 1), 0),
         }
     end
 
@@ -214,18 +219,20 @@ local function installVisualParticles(Visuals, Profile)
                         and size
                         or randomRange(plan.endSizeMin, plan.endSizeMax)
                     particle:SetDieTime(randomRange(plan.lifetimeMin, plan.lifetimeMax))
-                    particle:SetStartAlpha(plan.alpha)
+                    particle:SetStartAlpha(randomRange(plan.alphaMin, plan.alphaMax))
                     particle:SetEndAlpha(0)
                     particle:SetStartSize(size)
                     particle:SetEndSize(endSize)
                     particle:SetColor(plan.red, plan.green, plan.blue)
                     particle:SetVelocity(particleVelocity)
                     particle:SetGravity(plan.gravity)
-                    particle:SetCollide(plan.collide)
+                    local collides = plan.collide
+                        and (plan.collideChance >= 1 or math.Rand(0, 1) < plan.collideChance)
+                    particle:SetCollide(collides)
                     particle:SetLighting(plan.lighting)
                     particle:SetRoll(math.Rand(-math.pi, math.pi))
                     particle:SetRollDelta(math.Rand(-plan.spin, plan.spin))
-                    if plan.collide then particle:SetBounce(plan.bounce) end
+                    if collides then particle:SetBounce(plan.bounce) end
                     if plan.airResistance ~= nil then
                         particle:SetAirResistance(math.max(plan.airResistance, 0))
                     end

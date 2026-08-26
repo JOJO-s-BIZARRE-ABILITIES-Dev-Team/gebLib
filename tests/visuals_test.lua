@@ -203,6 +203,9 @@ do
         endSizeMax = 12,
         speedMin = 20,
         speedMax = 40,
+        alphaMin = 100,
+        alphaMax = 200,
+        collideChance = 0.4,
         maxActiveParticles = 3,
     })
     local rangedEmitter = emitters[#emitters]
@@ -210,6 +213,8 @@ do
     assertNear(rangedEmitter.particles[1].dieTime, 0.6, 0.0001, "random lifetime range")
     assertEqual(rangedEmitter.particles[1].startSize, 4, "random size range")
     assertEqual(rangedEmitter.particles[1].endSize, 10, "random end size range")
+    assertEqual(rangedEmitter.particles[1].startAlpha, 150, "random alpha range")
+    assertEqual(rangedEmitter.particles[1].collide, false, "particle collision chance")
 
     local sharedEmitter = ParticleEmitter(position, false)
     assertEqual(Visuals.CreateDebrisBurst("effects/fleck", position, 2, {
