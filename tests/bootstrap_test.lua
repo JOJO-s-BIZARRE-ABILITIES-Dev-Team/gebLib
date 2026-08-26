@@ -54,7 +54,7 @@ do
 
     assertEqual(ok, true, "server bootstrap should load")
     assertEqual(#included, 11, "server should include shared modules and debris precaching")
-    assertEqual(#sent, 30, "server should send shared, client, and support modules")
+    assertEqual(#sent, 31, "server should send shared, client, and support modules")
     assertEqual(included[1], "geblib/runtime.lua", "shared runtime should load first")
     assertEqual(included[2], "geblib/math.lua", "math helpers should load before combat")
     assertEqual(included[3], "geblib/combat.lua", "combat should load before addon code")
@@ -67,7 +67,8 @@ do
     assertEqual(sent[22], "geblib/impact_frames.lua", "last client module sent")
     assertEqual(sent[23], "geblib/net_codecs.lua", "network codecs should be sent as support code")
     assertEqual(sent[24], "geblib/net_profile.lua", "network profile should be sent as support code")
-    assertEqual(sent[30], "geblib/visuals_decal.lua", "last client support module sent")
+    assertEqual(sent[25], "geblib/impact_frames_render.lua", "impact-frame renderer support")
+    assertEqual(sent[31], "geblib/visuals_decal.lua", "last client support module sent")
     assertEqual(addedHooks.OnRequestFullUpdate.name, "gebLib.PlayerFullyConnected", "server connection hook")
     assertEqual(gebLib.Loaded, true, "server bootstrap should publish readiness")
     assertEqual(#runHooks, 1, "server should publish readiness once")

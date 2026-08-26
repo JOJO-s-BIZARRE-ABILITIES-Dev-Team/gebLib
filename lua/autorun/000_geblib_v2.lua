@@ -54,6 +54,7 @@ local clientFiles = {
 local supportFiles = {
     "geblib/net_codecs.lua",
     "geblib/net_profile.lua",
+    "geblib/impact_frames_render.lua",
     "geblib/visuals_surface.lua",
     "geblib/visuals_config.lua",
     "geblib/visuals_runtime.lua",
