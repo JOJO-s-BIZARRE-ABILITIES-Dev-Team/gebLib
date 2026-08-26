@@ -44,7 +44,6 @@ local PROMOTION_HOOK_NAME = "gebLib.Visuals.DebrisPromotions"
 local MESH_WARMUP_HOOK_NAME = "gebLib.Visuals.DebrisMeshWarmup"
 local MAX_BATCH_VERTICES = 60000
 local MAX_PROMOTION_PIECES_PER_FRAME = 64
-local BATCH_TRIANGLE_ORDER = {0, 1, 2}
 local BATCH_CELL_SIZE = 512
 local BATCH_EXPIRY_BUCKET = 0.25
 local BATCH_QUEUE_MAX_DELAY = 0.05
@@ -62,6 +61,7 @@ local BATCH_LIGHTING_DIRECTIONS = {
 local debrisBatches = {}
 local activeBatchPieces = 0
 local modelMeshCache = {}
+local batchMaterialCache = {}
 local promotionQueue = {}
 local promotionGroups = {}
 local promotionHead = 1
@@ -157,6 +157,41 @@ function Visuals.GetDebrisBatchState()
     }
 end
 
+local function normalizeTriangleWinding(triangles)
+    for triangleIndex = 1, #triangles, 3 do
+        local first = triangles[triangleIndex]
+        local second = triangles[triangleIndex + 1]
+        local third = triangles[triangleIndex + 2]
+        local firstPosition = first and first.pos
+        local secondPosition = second and second.pos
+        local thirdPosition = third and third.pos
+        local firstNormal = first and first.normal
+        local secondNormal = second and second.normal
+        local thirdNormal = third and third.normal
+
+        if firstPosition and secondPosition and thirdPosition
+            and firstNormal and secondNormal and thirdNormal
+        then
+            local abX = secondPosition.x - firstPosition.x
+            local abY = secondPosition.y - firstPosition.y
+            local abZ = secondPosition.z - firstPosition.z
+            local acX = thirdPosition.x - firstPosition.x
+            local acY = thirdPosition.y - firstPosition.y
+            local acZ = thirdPosition.z - firstPosition.z
+            local faceX = abY * acZ - abZ * acY
+            local faceY = abZ * acX - abX * acZ
+            local faceZ = abX * acY - abY * acX
+            local normalX = firstNormal.x + secondNormal.x + thirdNormal.x
+            local normalY = firstNormal.y + secondNormal.y + thirdNormal.y
+            local normalZ = firstNormal.z + secondNormal.z + thirdNormal.z
+
+            if faceX * normalX + faceY * normalY + faceZ * normalZ < 0 then
+                triangles[triangleIndex + 1], triangles[triangleIndex + 2] = third, second
+            end
+        end
+    end
+end
+
 local function sourceMeshes(modelPath, stats, cacheFailure)
     local cached = modelMeshCache[modelPath]
     if cached ~= nil then
@@ -168,12 +203,48 @@ local function sourceMeshes(modelPath, stats, cacheFailure)
     local startedAt = stats and profileClock and profileClock()
     local meshes = util.GetModelMeshes and util.GetModelMeshes(modelPath, 0)
     if meshes then
+        for sourceIndex = 1, #meshes do
+            local triangles = meshes[sourceIndex].triangles
+            if triangles and #triangles % 3 == 0 then normalizeTriangleWinding(triangles) end
+        end
         modelMeshCache[modelPath] = meshes
     elseif cacheFailure ~= false then
         modelMeshCache[modelPath] = false
     end
     if stats then recordDuration(stats, "sourceTime", startedAt) end
     return meshes
+end
+
+local function batchMaterial(materialName)
+    local cached = batchMaterialCache[materialName]
+    if cached ~= nil then return cached or nil end
+
+    local source = Material(materialName)
+    if not source or source.IsError and source:IsError() then
+        batchMaterialCache[materialName] = false
+        return nil
+    end
+
+    local texture = source:GetTexture("$basetexture")
+    local textureName = texture and texture:GetName()
+    if not textureName or textureName == "" then
+        batchMaterialCache[materialName] = false
+        return nil
+    end
+
+    cached = CreateMaterial("geblib_debris_batch_" .. util.CRC(materialName), "UnlitGeneric", {
+        ["$basetexture"] = textureName,
+        ["$model"] = "1",
+        ["$vertexcolor"] = "1",
+        ["$vertexalpha"] = "1",
+    })
+    if not cached or cached.IsError and cached:IsError() then
+        batchMaterialCache[materialName] = false
+        return nil
+    end
+
+    batchMaterialCache[materialName] = cached
+    return cached
 end
 
 if hook and hook.Add and Surface.AllModels and util and util.GetModelMeshes then
@@ -302,8 +373,8 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
 
     local singleGroup
     if singleMaterial then
-        local material = Material(sharedMaterialName)
-        if not material or material.IsError and material:IsError() then return fail() end
+        local material = batchMaterial(sharedMaterialName)
+        if not material then return fail() end
         singleGroup = {
             material = material,
             chunks = {{entries = {}, vertexCount = 0}},
@@ -334,8 +405,8 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
                 if not group then
                     group = groups[materialName]
                     if not group then
-                        local material = Material(materialName)
-                        if not material or material.IsError and material:IsError() then return fail() end
+                        local material = batchMaterial(materialName)
+                        if not material then return fail() end
                         group = {
                             material = material,
                             chunks = {{entries = {}, vertexCount = 0}},
@@ -379,8 +450,8 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
                         local origin = piece.position
                         local scale = piece.scale
                         for triangleIndex = entry.firstVertex, entry.lastVertex, 3 do
-                            for corner = 1, 3 do
-                                local vertex = entry.triangles[triangleIndex + BATCH_TRIANGLE_ORDER[corner]]
+                            for vertexIndex = triangleIndex, triangleIndex + 2 do
+                                local vertex = entry.triangles[vertexIndex]
                                 local sourcePosition = vertex.pos
                                 local localX = sourcePosition.x * scale
                                 local localY = sourcePosition.y * scale
@@ -752,6 +823,18 @@ local function prepareBatchLighting(batch, now, refreshes, stats)
             )
         end
         cell.lighting = lighting
+        local red, green, blue = 0, 0, 0
+        for index = 1, #lighting do
+            local color = lighting[index]
+            red = math.max(red, color.x)
+            green = math.max(green, color.y)
+            blue = math.max(blue, color.z)
+        end
+        cell.modulation = Vector(
+            math.Clamp(red, 0.15, 1.5),
+            math.Clamp(green, 0.15, 1.5),
+            math.Clamp(blue, 0.15, 1.5)
+        )
         cell.revision = cell.revision + 1
         nextLightingRefresh(cell, now)
         refreshes = refreshes + 1
@@ -771,11 +854,8 @@ end
 
 local function bindBatchLighting(cell, stats)
     local startedAt = stats and profileClock()
-    render.ResetModelLighting(0, 0, 0)
-    for index = 1, #BATCH_LIGHTING_DIRECTIONS do
-        local color = cell.lighting[index]
-        render.SetModelLighting(BATCH_LIGHTING_DIRECTIONS[index][1], color.x, color.y, color.z)
-    end
+    local color = cell.modulation
+    render.SetColorModulation(color.x, color.y, color.z)
     if stats then
         local elapsed = recordDuration(stats, "lightingBindTime", startedAt)
         stats.lightingBinds = stats.lightingBinds + 1
@@ -791,7 +871,6 @@ if hook and hook.Add then
         if stats then stats.renderHooks = stats.renderHooks + 1 end
         local now = CurTime()
         local renderEnabled = Visuals.DebrisRenderEnabled ~= false
-        local localLightsCleared = false
         local lightingRefreshes = 0
         local boundLightingCell
         local boundLightingRevision
@@ -814,10 +893,6 @@ if hook and hook.Add then
                     end
 
                     if blend > 0 then
-                        if not localLightsCleared then
-                            render.SetLocalModelLights()
-                            localLightsCleared = true
-                        end
                         local lightingCell
                         lightingCell, lightingRefreshes = prepareBatchLighting(
                             batch,
@@ -861,6 +936,8 @@ if hook and hook.Add then
                 end
             end
         end
+
+        if boundLightingCell then render.SetColorModulation(1, 1, 1) end
 
         if stats then
             stats.maxLightingRefreshesPerHook = math.max(
