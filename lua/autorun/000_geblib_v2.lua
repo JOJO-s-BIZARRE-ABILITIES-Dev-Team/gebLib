@@ -55,12 +55,14 @@ local supportFiles = {
     "geblib/net_codecs.lua",
     "geblib/net_profile.lua",
     "geblib/impact_frames_render.lua",
-    "geblib/visuals_surface.lua",
-    "geblib/visuals_config.lua",
-    "geblib/visuals_runtime.lua",
-    "geblib/visuals_profile.lua",
-    "geblib/visuals_wave.lua",
-    "geblib/visuals_decal.lua",
+    "geblib/visuals/surface.lua",
+    "geblib/visuals/runtime.lua",
+    "geblib/visuals/profile.lua",
+    "geblib/visuals/debris_batch.lua",
+    "geblib/visuals/particles.lua",
+    "geblib/visuals/impact.lua",
+    "geblib/visuals/wave.lua",
+    "geblib/visuals/decal.lua",
 }
 
 if SERVER then
@@ -81,7 +83,7 @@ for _, path in ipairs(sharedFiles) do
     include(path)
 end
 
-if SERVER then include("geblib/visuals_surface.lua") end
+if SERVER then include("geblib/visuals/surface.lua") end
 
 if CLIENT then
     for _, path in ipairs(clientFiles) do

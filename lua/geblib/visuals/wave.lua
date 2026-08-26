@@ -1,4 +1,4 @@
-local function installDebrisWave(Visuals, Runtime, Surface, Config, Profile, queueStaticDebrisPiece)
+local function installDebrisWave(Visuals, Runtime, Surface, Profile, Batch)
     local previous = gebLib._VisualsWaveState
     if previous then
         Runtime.Unregister(previous.scheduler)
@@ -33,6 +33,122 @@ local function waveNumber(value, fallback, minimum)
     if not value or value ~= value or value == math.huge or value == -math.huge then value = fallback end
     if minimum then value = math.max(value, minimum) end
     return value
+end
+
+local function copyValue(value)
+    if isvector and isvector(value) then return Vector(value.x, value.y, value.z) end
+    if isangle and isangle(value) then return Angle(value.p, value.y, value.r) end
+    if IsColor and IsColor(value) then return Color(value.r, value.g, value.b, value.a) end
+    return value
+end
+
+local function copyOptions(source)
+    local owned = {}
+    if type(source) ~= "table" then return owned end
+    for key, value in pairs(source) do owned[key] = copyValue(value) end
+    return owned
+end
+
+local function normalizeWave(options)
+    if type(options) ~= "table" then return end
+    options = copyOptions(options)
+
+    local count = math.floor(waveNumber(options.count, 1, 0))
+    local propConfig
+    if options.prop ~= false then propConfig = copyOptions(options.prop) end
+    local modelConfig
+    if options.model ~= false then modelConfig = copyOptions(options.model) end
+    local waterConfig = options.water == false and false or copyOptions(options.water)
+    if count == 0 or (not propConfig and not modelConfig and waterConfig == false) then return end
+
+    local direction = copyValue(options.direction) or Vector(1, 0, 0)
+    if direction:LengthSqr() == 0 then direction = Vector(1, 0, 0) end
+    direction = direction:GetNormalized()
+
+    local spreadAxis = copyValue(options.spreadAxis)
+    if not spreadAxis or spreadAxis:LengthSqr() == 0 then
+        spreadAxis = direction:Cross(vector_up)
+        if spreadAxis:LengthSqr() == 0 then spreadAxis = direction:Cross(Vector(0, 1, 0)) end
+    end
+    spreadAxis = spreadAxis:GetNormalized()
+
+    local material = options.material
+    local materialType = Surface.NormalizeMaterial(options.materialType or MAT_CONCRETE)
+    local surface = type(options.surface) == "table" and copyOptions(options.surface) or nil
+    if surface then
+        local sampledMaterial, sampledType = Surface.MaterialAt(
+            surface.position or options.origin or vector_origin,
+            surface.normal or vector_up,
+            surface.hitTexture,
+            surface.materialType or options.materialType
+        )
+        if material == nil then material = sampledMaterial end
+        materialType = sampledType
+    end
+
+    local floorConfig
+    if type(options.floor) == "table" then
+        local floor = copyOptions(options.floor)
+        local floorTrace = {}
+        local floorMask = floor.mask
+        if floorMask == nil then
+            floorMask = MASK_SOLID
+            if floor.water ~= false and bit and bit.bor and MASK_WATER then
+                floorMask = bit.bor(floorMask, MASK_WATER)
+            end
+        end
+        floorConfig = {
+            StartHeight = waveNumber(floor.startHeight, 64, 0),
+            Depth = waveNumber(floor.depth, 256, 0),
+            Offset = waveNumber(floor.offset, 1),
+            MinNormalZ = waveNumber(floor.minNormalZ, 0.2, -1),
+            RejectSky = floor.rejectSky ~= false,
+            RejectNoDraw = floor.rejectNoDraw ~= false,
+            ColorFallback = floor.colorFallback ~= false,
+            Trace = floorTrace,
+            TraceData = {
+                mask = floorMask,
+                filter = floor.filter,
+                collisiongroup = floor.collisionGroup,
+                ignoreworld = floor.ignoreWorld,
+                output = floorTrace,
+            },
+        }
+    end
+
+    return {
+        Active = true,
+        Started = false,
+        StartAt = CurTime() + waveNumber(options.delay, 0, 0),
+        PausedAt = nil,
+        NextStep = 1,
+        Spawned = 0,
+        Skipped = 0,
+        Count = count,
+        Interval = waveNumber(options.interval, 0.01, 0),
+        MaxStepsPerFrame = math.floor(waveNumber(options.maxStepsPerFrame, 12, 1)),
+        Origin = copyValue(options.origin) or vector_origin,
+        Direction = direction,
+        SpreadAxis = spreadAxis,
+        DistanceStep = waveNumber(options.distanceStep, 35),
+        Spread = waveNumber(options.spread, 0, 0),
+        IntegerSpread = options.integerSpread == true,
+        Lifetime = waveNumber(options.lifetime, 5, 0),
+        PreserveCount = options.preserveCount == true,
+        Material = material,
+        MaterialType = materialType,
+        PhysicsMaterial = Surface.PhysicsMaterial(materialType),
+        FloorConfig = floorConfig,
+        ModelPath = options.modelPath,
+        PropConfig = propConfig,
+        ModelConfig = modelConfig,
+        WaterConfig = waterConfig,
+        Events = copyOptions(options.events),
+        OnStart = options.onStart,
+        OnStep = options.onStep,
+        OnComplete = options.onComplete,
+        OnCancel = options.onCancel,
+    }
 end
 
 local function waveCallback(callback, wave, label, ...)
@@ -342,7 +458,7 @@ local function spawnDebrisWaveStep(wave, step)
         local modelScale = waveScale(modelConfig)
         local queued = not surfaceColor
             and type(modelConfig.setup) ~= "function"
-            and queueStaticDebrisPiece({
+            and Batch.Queue({
                 modelPath = modelPath,
                 position = modelPosition,
                 angles = modelAngles,
@@ -472,7 +588,7 @@ end
 function Visuals.CreateDebrisWave(options)
     local stats = profileWaves()
     local planStartedAt = stats and profileClock()
-    local plan = Config.Wave(options)
+    local plan = normalizeWave(options)
     if stats then recordDuration(stats, "planTime", planStartedAt) end
     if not plan then return end
 

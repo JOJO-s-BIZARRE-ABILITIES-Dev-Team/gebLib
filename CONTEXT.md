@@ -43,6 +43,9 @@ A normalized trace or target-selection result used by damage and force policy.
 **Transient Visual**:
 A client-only debris model or decal with a finite lifetime.
 
+**Static Debris Batch**:
+A spatial group of settled Transient Visual geometry rendered with shared meshes and lighting.
+
 **Debris Wave**:
 A controllable Transient Visual that emits ordered debris steps over time from one shared frame scheduler.
 
@@ -92,6 +95,7 @@ Opt-in observations about packet and record size, frequency, recipients, repeate
 - An **Audio Session** owns cancellation, retry, playback, fades, and cleanup for one active sound.
 - A **Combat Contact** records geometry; the addon still owns target eligibility, tuning, and attack sequencing.
 - A **Transient Visual** exists only on the client that creates it.
+- A **Static Debris Batch** preserves the material and expiration of its Transient Visuals.
 - A **Debris Wave** owns its emission progress and may be paused, resumed, or cancelled independently.
 - The **Frame Dispatcher** advances lifecycles without owning their domain rules.
 - A **Debris Wave** executes one **Transient Visual Plan** that cannot be changed through its caller's settings table.
