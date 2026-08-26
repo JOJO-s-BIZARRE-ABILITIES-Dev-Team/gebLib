@@ -19,8 +19,26 @@ A named client callback that composes one part of the active player view in dete
 **Bone Controller**:
 A named client rule that contributes an additive target rotation to one player bone.
 
+**Bone Matrix Modifier**:
+A named client rule that owns one ordered transformation of an entity's built bone matrices.
+
 **Player Replica**:
 A clientside model that mirrors a player's appearance, animation pose, and optionally captured bone matrices.
+
+**Replica Trail**:
+A bounded client-owned history of Player Replica poses with capture cadence and expiration.
+
+**Camera Impulse**:
+A short collection of numeric camera values with per-value exponential decay.
+
+**Visual Batch**:
+A reusable client buffer that submits one beam or sprite render pass.
+
+**Audio Session**:
+A client-owned lifecycle for one sound patch or asynchronous file channel.
+
+**Combat Contact**:
+A normalized trace or target-selection result used by damage and force policy.
 
 **Transient Visual**:
 A client-only debris model or decal with a finite lifetime.
@@ -66,7 +84,13 @@ Opt-in observations about packet and record size, frequency, recipients, repeate
 - A **Cinematic Camera** contributes its view through a high-priority **Camera Modifier**.
 - Multiple **Camera Modifiers** compose one view from lower to higher priority.
 - Multiple **Bone Controllers** may contribute additive rotations to the same player bone.
+- Multiple **Bone Matrix Modifiers** compose by priority, while only the highest active modifier in a named channel runs.
 - A **Player Replica** mirrors a valid source player but owns its own position and drawing lifecycle.
+- A **Replica Trail** owns a bounded pool of pose snapshots for one source entity.
+- A **Camera Impulse** belongs to one Camera Modifier adapter and expires after its values decay.
+- A **Visual Batch** owns reusable positions and colors, while its caller owns geometry and style.
+- An **Audio Session** owns cancellation, retry, playback, fades, and cleanup for one active sound.
+- A **Combat Contact** records geometry; the addon still owns target eligibility, tuning, and attack sequencing.
 - A **Transient Visual** exists only on the client that creates it.
 - A **Debris Wave** owns its emission progress and may be paused, resumed, or cancelled independently.
 - The **Frame Dispatcher** advances lifecycles without owning their domain rules.

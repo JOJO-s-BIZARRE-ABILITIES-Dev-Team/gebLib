@@ -1,6 +1,6 @@
 # gebLib 3
 
-gebLib is a small Garry's Mod Lua library for status effects, player animation layers, cinematic cameras, transient visuals, networking, and a few focused helpers.
+gebLib is a small Garry's Mod Lua library for recurring combat, animation, camera, audio, visual, status-effect, and networking systems.
 
 ## Loading and dependencies
 
@@ -260,7 +260,25 @@ gebLib.BoneControllers.Register("myaddon.aim", {
 })
 ```
 
+Register ordered bone-matrix poses once, then track entities without giving each feature its own `BuildBonePositions` callback:
+
+```lua
+gebLib.BoneMatrixModifiers.Register("myaddon.block", {
+    Priority = 100,
+    Channel = "combat_pose",
+    IsActive = function(entity) return entity:GetNWBool("Blocking") end,
+    Apply = function(entity)
+        -- Apply bone matrices here.
+    end,
+})
+gebLib.BoneMatrixModifiers.Track(player, "myaddon")
+```
+
 `gebLib.PlayerReplica` creates and synchronizes clientside player copies. Use `SyncAppearance` for model, skin, bodygroups, color, and scale; `SyncPose` for sequence, cycle, pose parameters, and registered bone transforms; and `CaptureBoneMatrices` plus `ApplyBoneMatrices` for frozen afterimages.
+
+`gebLib.ReplicaTrail.New(source, options)` adds bounded capture cadence, expiry, pool reuse, sequence snapshots, frozen-matrix snapshots, and drawing lifecycle. Use `mode = "sequence"` for lightweight trails or `mode = "matrices"` for exact frozen poses.
+
+`gebLib.CameraImpulses.Create(name, priority, adapter)` registers a Camera Modifier with numeric impulses, distance attenuation, per-key decay, maximum or additive composition, and sustained values.
 
 ## Reusable visual systems
 
@@ -297,6 +315,21 @@ gebLib.ImpactFrames.Play("heavy", {
 ```
 
 Use `RegisterSequence` and `RegisterPreset` to define addon-specific styles. Clients control the effect with `geblib_impact_frames` and its custom shader with `geblib_impact_frames_shader`.
+
+`gebLib.Visuals.BeamBatch` and `gebLib.Visuals.SpriteBatch` own reusable render buffers. Callers retain path geometry, widths, colors, materials, and draw timing.
+
+`gebLib.Audio.New()` creates one Audio Session. `PlayPatch` adapts `CSoundPatch`; `PlayFile` adapts asynchronous file channels with stale-request cancellation and retry deadlines. The session also owns restart, fades, volume, pitch, and cleanup.
+
+## Combat helpers
+
+`gebLib.Combat` separates engine mechanics from addon attack policy:
+
+- `TraceAttack`, `TraceWater`, and `ContactFromTrace` produce normalized Combat Contacts.
+- `CollectCone`, `ClosestToRay`, and `CollectSphere` select visible or unoccluded targets.
+- `DirectionalRadialForce` and `gebLib.Math.DistanceFalloff` calculate reusable force falloff.
+- `ApplyDamage`, `ApplyKnockback`, `ApplyHit`, and `ApplyRadialImpact` own `DamageInfo`, physics, and living-entity knockback mechanics.
+
+Callers still decide valid targets, damage types and values, force tuning, cooldowns, dissolves, effects, and attack sequencing.
 
 ## Other helpers
 
