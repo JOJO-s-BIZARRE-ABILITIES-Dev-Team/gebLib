@@ -44,6 +44,7 @@ local PROMOTION_HOOK_NAME = "gebLib.Visuals.DebrisPromotions"
 local MESH_WARMUP_HOOK_NAME = "gebLib.Visuals.DebrisMeshWarmup"
 local MAX_BATCH_VERTICES = 60000
 local MAX_PROMOTION_PIECES_PER_FRAME = 64
+local BATCH_TRIANGLE_ORDER = {0, 2, 1}
 local BATCH_CELL_SIZE = 512
 local BATCH_EXPIRY_BUCKET = 0.25
 local BATCH_QUEUE_MAX_DELAY = 0.05
@@ -61,7 +62,6 @@ local BATCH_LIGHTING_DIRECTIONS = {
 local debrisBatches = {}
 local activeBatchPieces = 0
 local modelMeshCache = {}
-local batchMaterialCache = {}
 local promotionQueue = {}
 local promotionGroups = {}
 local promotionHead = 1
@@ -176,36 +176,6 @@ local function sourceMeshes(modelPath, stats, cacheFailure)
     return meshes
 end
 
-local function batchMaterial(materialName)
-    local cached = batchMaterialCache[materialName]
-    if cached ~= nil then return cached or nil end
-
-    local source = Material(materialName)
-    if not source or source.IsError and source:IsError() then
-        batchMaterialCache[materialName] = false
-        return nil
-    end
-
-    local texture = source:GetTexture("$basetexture")
-    local textureName = texture and texture:GetName()
-    if not textureName or textureName == "" then
-        batchMaterialCache[materialName] = false
-        return nil
-    end
-
-    cached = CreateMaterial("geblib_debris_batch_" .. util.CRC(materialName), "UnlitGeneric", {
-        ["$basetexture"] = textureName,
-        ["$model"] = "1",
-    })
-    if not cached or cached.IsError and cached:IsError() then
-        batchMaterialCache[materialName] = false
-        return nil
-    end
-
-    batchMaterialCache[materialName] = cached
-    return cached
-end
-
 if hook and hook.Add and Surface.AllModels and util and util.GetModelMeshes then
     local warmupIndex = 1
     hook.Add("Think", MESH_WARMUP_HOOK_NAME, function()
@@ -300,7 +270,7 @@ local function lightingCellFor(position)
 end
 
 local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
-    if #pieces == 0 or not Mesh or not util.GetModelMeshes then return false end
+    if #pieces == 0 or not Mesh or not mesh or not mesh.Begin or not util.GetModelMeshes then return false end
     local stats = batchStats()
     local totalStartedAt = stats and profileClock()
     local transformTime = 0
@@ -332,8 +302,8 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
 
     local singleGroup
     if singleMaterial then
-        local material = batchMaterial(sharedMaterialName)
-        if not material then return fail() end
+        local material = Material(sharedMaterialName)
+        if not material or material.IsError and material:IsError() then return fail() end
         singleGroup = {
             material = material,
             chunks = {{entries = {}, vertexCount = 0}},
@@ -364,8 +334,8 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
                 if not group then
                     group = groups[materialName]
                     if not group then
-                        local material = batchMaterial(materialName)
-                        if not material then return fail() end
+                        local material = Material(materialName)
+                        if not material or material.IsError and material:IsError() then return fail() end
                         group = {
                             material = material,
                             chunks = {{entries = {}, vertexCount = 0}},
@@ -390,14 +360,16 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
             local chunk = group.chunks[chunkIndex]
             if chunk.vertexCount > 0 then
                 local drawing
+                local meshBegun = false
                 local ok = pcall(function()
                     local buildStartedAt = stats and profileClock()
                     drawing = {mesh = Mesh(group.material), material = group.material}
                     if not drawing.mesh then error("failed to create IMesh") end
+                    mesh.Begin(drawing.mesh, MATERIAL_TRIANGLES, chunk.vertexCount / 3)
+                    meshBegun = true
                     if stats then buildTime = buildTime + profileClock() - buildStartedAt end
 
                     local transformStartedAt = stats and profileClock()
-                    local triangles = {}
                     for entryIndex = 1, #chunk.entries do
                         local entry = chunk.entries[entryIndex]
                         local piece = entry.piece
@@ -406,54 +378,58 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
                         local up = piece.batchUp
                         local origin = piece.position
                         local scale = piece.scale
-                        for vertexIndex = entry.firstVertex, entry.lastVertex do
-                            local vertex = entry.triangles[vertexIndex]
-                            local sourcePosition = vertex.pos
-                            local localX = sourcePosition.x * scale
-                            local localY = sourcePosition.y * scale
-                            local localZ = sourcePosition.z * scale
-                            position.x = origin.x
-                                + forward.x * localX - right.x * localY + up.x * localZ
-                            position.y = origin.y
-                                + forward.y * localX - right.y * localY + up.y * localZ
-                            position.z = origin.z
-                                + forward.z * localX - right.z * localY + up.z * localZ
+                        for triangleIndex = entry.firstVertex, entry.lastVertex, 3 do
+                            for corner = 1, 3 do
+                                local vertex = entry.triangles[triangleIndex + BATCH_TRIANGLE_ORDER[corner]]
+                                local sourcePosition = vertex.pos
+                                local localX = sourcePosition.x * scale
+                                local localY = sourcePosition.y * scale
+                                local localZ = sourcePosition.z * scale
+                                position.x = origin.x
+                                    + forward.x * localX - right.x * localY + up.x * localZ
+                                position.y = origin.y
+                                    + forward.y * localX - right.y * localY + up.y * localZ
+                                position.z = origin.z
+                                    + forward.z * localX - right.z * localY + up.z * localZ
 
-                            local sourceNormal = vertex.normal or vector_up
-                            normal.x = forward.x * sourceNormal.x
-                                - right.x * sourceNormal.y + up.x * sourceNormal.z
-                            normal.y = forward.y * sourceNormal.x
-                                - right.y * sourceNormal.y + up.y * sourceNormal.z
-                            normal.z = forward.z * sourceNormal.x
-                                - right.z * sourceNormal.y + up.z * sourceNormal.z
+                                local sourceNormal = vertex.normal or vector_up
+                                normal.x = forward.x * sourceNormal.x
+                                    - right.x * sourceNormal.y + up.x * sourceNormal.z
+                                normal.y = forward.y * sourceNormal.x
+                                    - right.y * sourceNormal.y + up.y * sourceNormal.z
+                                normal.z = forward.z * sourceNormal.x
+                                    - right.z * sourceNormal.y + up.z * sourceNormal.z
 
-                            if not bounds.mins then
-                                bounds.mins = Vector(position.x, position.y, position.z)
-                                bounds.maxs = Vector(position.x, position.y, position.z)
-                            else
-                                bounds.mins.x = math.min(bounds.mins.x, position.x)
-                                bounds.mins.y = math.min(bounds.mins.y, position.y)
-                                bounds.mins.z = math.min(bounds.mins.z, position.z)
-                                bounds.maxs.x = math.max(bounds.maxs.x, position.x)
-                                bounds.maxs.y = math.max(bounds.maxs.y, position.y)
-                                bounds.maxs.z = math.max(bounds.maxs.z, position.z)
+                                if not bounds.mins then
+                                    bounds.mins = Vector(position.x, position.y, position.z)
+                                    bounds.maxs = Vector(position.x, position.y, position.z)
+                                else
+                                    bounds.mins.x = math.min(bounds.mins.x, position.x)
+                                    bounds.mins.y = math.min(bounds.mins.y, position.y)
+                                    bounds.mins.z = math.min(bounds.mins.z, position.z)
+                                    bounds.maxs.x = math.max(bounds.maxs.x, position.x)
+                                    bounds.maxs.y = math.max(bounds.maxs.y, position.y)
+                                    bounds.maxs.z = math.max(bounds.maxs.z, position.z)
+                                end
+
+                                local color = vertex.color or color_white
+                                mesh.Position(position)
+                                mesh.Normal(normal)
+                                mesh.TexCoord(0, vertex.u or 0, vertex.v or 0)
+                                mesh.Color(color.r or 255, color.g or 255, color.b or 255, color.a or 255)
+                                mesh.AdvanceVertex()
                             end
-
-                            triangles[#triangles + 1] = {
-                                pos = Vector(position.x, position.y, position.z),
-                                normal = Vector(normal.x, normal.y, normal.z),
-                                u = vertex.u or 0,
-                                v = vertex.v or 0,
-                            }
                         end
                     end
                     if stats then transformTime = transformTime + profileClock() - transformStartedAt end
 
                     buildStartedAt = stats and profileClock()
-                    drawing.mesh:BuildFromTriangles(triangles)
+                    mesh.End()
+                    meshBegun = false
                     if stats then buildTime = buildTime + profileClock() - buildStartedAt end
                 end)
 
+                if meshBegun then pcall(mesh.End) end
                 if not ok then
                     if drawing and drawing.mesh and drawing.mesh.Destroy then drawing.mesh:Destroy() end
                     return fail(built)
@@ -776,18 +752,6 @@ local function prepareBatchLighting(batch, now, refreshes, stats)
             )
         end
         cell.lighting = lighting
-        local red, green, blue = 0, 0, 0
-        for index = 1, #lighting do
-            local color = lighting[index]
-            red = math.max(red, color.x)
-            green = math.max(green, color.y)
-            blue = math.max(blue, color.z)
-        end
-        cell.modulation = Vector(
-            math.Clamp(red, 0.15, 1.5),
-            math.Clamp(green, 0.15, 1.5),
-            math.Clamp(blue, 0.15, 1.5)
-        )
         cell.revision = cell.revision + 1
         nextLightingRefresh(cell, now)
         refreshes = refreshes + 1
@@ -807,8 +771,11 @@ end
 
 local function bindBatchLighting(cell, stats)
     local startedAt = stats and profileClock()
-    local color = cell.modulation
-    render.SetColorModulation(color.x, color.y, color.z)
+    render.ResetModelLighting(0, 0, 0)
+    for index = 1, #BATCH_LIGHTING_DIRECTIONS do
+        local color = cell.lighting[index]
+        render.SetModelLighting(BATCH_LIGHTING_DIRECTIONS[index][1], color.x, color.y, color.z)
+    end
     if stats then
         local elapsed = recordDuration(stats, "lightingBindTime", startedAt)
         stats.lightingBinds = stats.lightingBinds + 1
@@ -824,6 +791,7 @@ if hook and hook.Add then
         if stats then stats.renderHooks = stats.renderHooks + 1 end
         local now = CurTime()
         local renderEnabled = Visuals.DebrisRenderEnabled ~= false
+        local localLightsCleared = false
         local lightingRefreshes = 0
         local boundLightingCell
         local boundLightingRevision
@@ -846,6 +814,10 @@ if hook and hook.Add then
                     end
 
                     if blend > 0 then
+                        if not localLightsCleared then
+                            render.SetLocalModelLights()
+                            localLightsCleared = true
+                        end
                         local lightingCell
                         lightingCell, lightingRefreshes = prepareBatchLighting(
                             batch,
@@ -889,8 +861,6 @@ if hook and hook.Add then
                 end
             end
         end
-
-        if boundLightingCell then render.SetColorModulation(1, 1, 1) end
 
         if stats then
             stats.maxLightingRefreshesPerHook = math.max(
