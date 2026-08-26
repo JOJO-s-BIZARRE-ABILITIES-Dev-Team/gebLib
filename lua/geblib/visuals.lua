@@ -45,9 +45,12 @@ local MESH_WARMUP_HOOK_NAME = "gebLib.Visuals.DebrisMeshWarmup"
 local MAX_BATCH_VERTICES = 60000
 local MAX_PROMOTION_PIECES_PER_FRAME = 64
 local BATCH_TRIANGLE_ORDER = {0, 2, 1}
-local BATCH_LIGHTING_INTERVAL = 0.25
-local BATCH_LIGHTING_CELL_SIZE = 128
-local MAX_LIGHTING_REFRESHES_PER_HOOK = 2
+local BATCH_CELL_SIZE = 512
+local BATCH_EXPIRY_BUCKET = 0.25
+local BATCH_QUEUE_MAX_DELAY = 0.05
+local BATCH_QUEUE_TARGET_PIECES = 12
+local BATCH_LIGHTING_INTERVAL = 1.5
+local MAX_LIGHTING_REFRESHES_PER_HOOK = 1
 local BATCH_LIGHTING_DIRECTIONS = {
     {BOX_FRONT, Vector(1, 0, 0)},
     {BOX_BACK, Vector(-1, 0, 0)},
@@ -133,7 +136,7 @@ end
 
 function Visuals.SetDebrisStaticBatching(enabled)
     local shouldEnable = enabled == true
-    if not shouldEnable and flushPendingStaticPieces then flushPendingStaticPieces() end
+    if not shouldEnable and flushPendingStaticPieces then flushPendingStaticPieces(true) end
     staticBatchingEnabled = shouldEnable
     if not staticBatchingEnabled then
         clearPromotionQueue()
@@ -236,10 +239,14 @@ local function appendBatchSource(group, piece, triangles)
 end
 
 local function batchCell(position)
-    local x = math.floor(position.x / BATCH_LIGHTING_CELL_SIZE)
-    local y = math.floor(position.y / BATCH_LIGHTING_CELL_SIZE)
-    local z = math.floor(position.z / BATCH_LIGHTING_CELL_SIZE)
+    local x = math.floor(position.x / BATCH_CELL_SIZE)
+    local y = math.floor(position.y / BATCH_CELL_SIZE)
+    local z = math.floor(position.z / BATCH_CELL_SIZE)
     return x .. ":" .. y .. ":" .. z, x, y, z
+end
+
+local function expiryBucket(expiresAt)
+    return math.floor(expiresAt / BATCH_EXPIRY_BUCKET)
 end
 
 local function lightingCellFor(position)
@@ -492,40 +499,61 @@ local function fallbackStaticPieces(group)
     end
 end
 
-flushPendingStaticPieces = function()
+flushPendingStaticPieces = function(force)
     if pendingStaticPieces == 0 then
         Runtime.Unregister(pendingBatchScheduler)
         return false
     end
 
-    Runtime.Unregister(pendingBatchScheduler)
+    local flushAll = force == true
+    local now = CurTime()
     local groups = pendingStaticOrder
-    pendingStaticGroups = {}
-    pendingStaticOrder = {}
-    pendingStaticPieces = 0
+    local remainingGroups = {}
+    local remainingOrder = {}
+    local remainingPieces = 0
+    local flushed = 0
     local stats = batchStats()
-    if stats then stats.queueFlushes = stats.queueFlushes + 1 end
 
     for index = 1, #groups do
         local group = groups[index]
-        local ok, built = pcall(
-            buildStaticBatch,
-            group.pieces,
-            0,
-            group.shadows,
-            group.expiresAt
-        )
-        if not ok or not built then
-            fallbackStaticPieces(group)
-            if stats then
-                if not ok then stats.failures = stats.failures + 1 end
-                stats.queuedFallbackPieces = stats.queuedFallbackPieces + #group.pieces
+        local ready = flushAll
+            or #group.pieces >= BATCH_QUEUE_TARGET_PIECES
+            or now - group.createdAt >= BATCH_QUEUE_MAX_DELAY
+
+        if ready then
+            flushed = flushed + 1
+            local ok, built = pcall(
+                buildStaticBatch,
+                group.pieces,
+                0,
+                group.shadows,
+                group.expiresAt
+            )
+            if not ok or not built then
+                fallbackStaticPieces(group)
+                if stats then
+                    if not ok then stats.failures = stats.failures + 1 end
+                    stats.queuedFallbackPieces = stats.queuedFallbackPieces + #group.pieces
+                end
+            elseif stats then
+                stats.queuedBuilds = stats.queuedBuilds + 1
             end
-        elseif stats then
-            stats.queuedBuilds = stats.queuedBuilds + 1
+        else
+            remainingGroups[group.key] = group
+            remainingOrder[#remainingOrder + 1] = group
+            remainingPieces = remainingPieces + #group.pieces
         end
     end
-    return false
+
+    pendingStaticGroups = remainingGroups
+    pendingStaticOrder = remainingOrder
+    pendingStaticPieces = remainingPieces
+    if stats and flushed > 0 then stats.queueFlushes = stats.queueFlushes + 1 end
+    if pendingStaticPieces == 0 then
+        Runtime.Unregister(pendingBatchScheduler)
+        return false
+    end
+    return true
 end
 
 local function queueStaticDebrisPiece(piece, lifetime, shadows, preserveCount)
@@ -543,19 +571,22 @@ local function queueStaticDebrisPiece(piece, lifetime, shadows, preserveCount)
     local expiresAt = CurTime() + lifetime
     local cellKey = batchCell(piece.position)
     local key = cellKey .. "\n" .. tostring(piece.material or "")
-        .. "\n" .. tostring(expiresAt) .. "\n" .. tostring(shadows ~= false)
+        .. "\n" .. tostring(expiryBucket(expiresAt)) .. "\n" .. tostring(shadows ~= false)
     local group = pendingStaticGroups[key]
     if not group then
         group = {
+            key = key,
             pieces = {},
             expiresAt = expiresAt,
+            createdAt = CurTime(),
             shadows = shadows ~= false,
             preserveCount = preserveCount == true,
         }
         pendingStaticGroups[key] = group
         pendingStaticOrder[#pendingStaticOrder + 1] = group
-    elseif preserveCount then
-        group.preserveCount = true
+    else
+        group.expiresAt = math.min(group.expiresAt, expiresAt)
+        if preserveCount then group.preserveCount = true end
     end
 
     group.pieces[#group.pieces + 1] = piece
@@ -668,7 +699,9 @@ function Visuals.QueueRetiredDebris(entity)
         promotionGroups[ownerKey] = ownerGroups
     end
     local expiresAt = entity.gebLib_DebrisExpiresAt
-    local groupKey = batchCell(entity:GetPos()) .. "\n" .. tostring(expiresAt)
+    local shadows = entity.gebLib_DebrisBatchShadows == true
+    local groupKey = batchCell(entity:GetPos()) .. "\n" .. tostring(expiryBucket(expiresAt))
+        .. "\n" .. tostring(shadows)
     local group = ownerGroups[groupKey]
     if not group then
         group = {
@@ -676,7 +709,7 @@ function Visuals.QueueRetiredDebris(entity)
             ownerGroups = ownerGroups,
             groupKey = groupKey,
             expiresAt = expiresAt,
-            shadows = entity.gebLib_DebrisBatchShadows == true,
+            shadows = shadows,
             entities = {},
             head = 1,
             tail = 0,
@@ -684,6 +717,8 @@ function Visuals.QueueRetiredDebris(entity)
         ownerGroups[groupKey] = group
         promotionTail = promotionTail + 1
         promotionQueue[promotionTail] = group
+    else
+        group.expiresAt = math.min(group.expiresAt, expiresAt)
     end
 
     group.tail = group.tail + 1
@@ -1561,7 +1596,7 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
         if smoke then
             local smokeSetupStartedAt = profiling and profileClock()
             smokeEffect = smoke
-            local smokeCount = math.Clamp(tonumber(options.smokeCount) or count * 0.5, 1, 1000) * 0.01
+            local smokeCount = math.Clamp(tonumber(options.smokeCount) or count * 0.3, 1, 96) * 0.01
             local color = options.smokeColor or impactColor(materialType)
             smoke:SetControlPoint(1, impactDirection)
             smoke:SetControlPoint(2, Vector(smokeCount, smokeCount, smokeCount))
