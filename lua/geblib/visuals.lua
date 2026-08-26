@@ -157,41 +157,6 @@ function Visuals.GetDebrisBatchState()
     }
 end
 
-local function normalizeTriangleWinding(triangles)
-    for triangleIndex = 1, #triangles, 3 do
-        local first = triangles[triangleIndex]
-        local second = triangles[triangleIndex + 1]
-        local third = triangles[triangleIndex + 2]
-        local firstPosition = first and first.pos
-        local secondPosition = second and second.pos
-        local thirdPosition = third and third.pos
-        local firstNormal = first and first.normal
-        local secondNormal = second and second.normal
-        local thirdNormal = third and third.normal
-
-        if firstPosition and secondPosition and thirdPosition
-            and firstNormal and secondNormal and thirdNormal
-        then
-            local abX = secondPosition.x - firstPosition.x
-            local abY = secondPosition.y - firstPosition.y
-            local abZ = secondPosition.z - firstPosition.z
-            local acX = thirdPosition.x - firstPosition.x
-            local acY = thirdPosition.y - firstPosition.y
-            local acZ = thirdPosition.z - firstPosition.z
-            local faceX = abY * acZ - abZ * acY
-            local faceY = abZ * acX - abX * acZ
-            local faceZ = abX * acY - abY * acX
-            local normalX = firstNormal.x + secondNormal.x + thirdNormal.x
-            local normalY = firstNormal.y + secondNormal.y + thirdNormal.y
-            local normalZ = firstNormal.z + secondNormal.z + thirdNormal.z
-
-            if faceX * normalX + faceY * normalY + faceZ * normalZ < 0 then
-                triangles[triangleIndex + 1], triangles[triangleIndex + 2] = third, second
-            end
-        end
-    end
-end
-
 local function sourceMeshes(modelPath, stats, cacheFailure)
     local cached = modelMeshCache[modelPath]
     if cached ~= nil then
@@ -203,10 +168,6 @@ local function sourceMeshes(modelPath, stats, cacheFailure)
     local startedAt = stats and profileClock and profileClock()
     local meshes = util.GetModelMeshes and util.GetModelMeshes(modelPath, 0)
     if meshes then
-        for sourceIndex = 1, #meshes do
-            local triangles = meshes[sourceIndex].triangles
-            if triangles and #triangles % 3 == 0 then normalizeTriangleWinding(triangles) end
-        end
         modelMeshCache[modelPath] = meshes
     elseif cacheFailure ~= false then
         modelMeshCache[modelPath] = false
@@ -235,8 +196,6 @@ local function batchMaterial(materialName)
     cached = CreateMaterial("geblib_debris_batch_" .. util.CRC(materialName), "UnlitGeneric", {
         ["$basetexture"] = textureName,
         ["$model"] = "1",
-        ["$vertexcolor"] = "1",
-        ["$vertexalpha"] = "1",
     })
     if not cached or cached.IsError and cached:IsError() then
         batchMaterialCache[materialName] = false
@@ -341,7 +300,7 @@ local function lightingCellFor(position)
 end
 
 local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
-    if #pieces == 0 or not Mesh or not mesh or not mesh.Begin or not util.GetModelMeshes then return false end
+    if #pieces == 0 or not Mesh or not util.GetModelMeshes then return false end
     local stats = batchStats()
     local totalStartedAt = stats and profileClock()
     local transformTime = 0
@@ -431,16 +390,14 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
             local chunk = group.chunks[chunkIndex]
             if chunk.vertexCount > 0 then
                 local drawing
-                local meshBegun = false
                 local ok = pcall(function()
                     local buildStartedAt = stats and profileClock()
                     drawing = {mesh = Mesh(group.material), material = group.material}
                     if not drawing.mesh then error("failed to create IMesh") end
-                    mesh.Begin(drawing.mesh, MATERIAL_TRIANGLES, chunk.vertexCount / 3)
-                    meshBegun = true
                     if stats then buildTime = buildTime + profileClock() - buildStartedAt end
 
                     local transformStartedAt = stats and profileClock()
+                    local triangles = {}
                     for entryIndex = 1, #chunk.entries do
                         local entry = chunk.entries[entryIndex]
                         local piece = entry.piece
@@ -449,58 +406,54 @@ local function buildStaticBatch(pieces, lifetime, shadows, expiresAt)
                         local up = piece.batchUp
                         local origin = piece.position
                         local scale = piece.scale
-                        for triangleIndex = entry.firstVertex, entry.lastVertex, 3 do
-                            for vertexIndex = triangleIndex, triangleIndex + 2 do
-                                local vertex = entry.triangles[vertexIndex]
-                                local sourcePosition = vertex.pos
-                                local localX = sourcePosition.x * scale
-                                local localY = sourcePosition.y * scale
-                                local localZ = sourcePosition.z * scale
-                                position.x = origin.x
-                                    + forward.x * localX - right.x * localY + up.x * localZ
-                                position.y = origin.y
-                                    + forward.y * localX - right.y * localY + up.y * localZ
-                                position.z = origin.z
-                                    + forward.z * localX - right.z * localY + up.z * localZ
+                        for vertexIndex = entry.firstVertex, entry.lastVertex do
+                            local vertex = entry.triangles[vertexIndex]
+                            local sourcePosition = vertex.pos
+                            local localX = sourcePosition.x * scale
+                            local localY = sourcePosition.y * scale
+                            local localZ = sourcePosition.z * scale
+                            position.x = origin.x
+                                + forward.x * localX - right.x * localY + up.x * localZ
+                            position.y = origin.y
+                                + forward.y * localX - right.y * localY + up.y * localZ
+                            position.z = origin.z
+                                + forward.z * localX - right.z * localY + up.z * localZ
 
-                                local sourceNormal = vertex.normal or vector_up
-                                normal.x = forward.x * sourceNormal.x
-                                    - right.x * sourceNormal.y + up.x * sourceNormal.z
-                                normal.y = forward.y * sourceNormal.x
-                                    - right.y * sourceNormal.y + up.y * sourceNormal.z
-                                normal.z = forward.z * sourceNormal.x
-                                    - right.z * sourceNormal.y + up.z * sourceNormal.z
+                            local sourceNormal = vertex.normal or vector_up
+                            normal.x = forward.x * sourceNormal.x
+                                - right.x * sourceNormal.y + up.x * sourceNormal.z
+                            normal.y = forward.y * sourceNormal.x
+                                - right.y * sourceNormal.y + up.y * sourceNormal.z
+                            normal.z = forward.z * sourceNormal.x
+                                - right.z * sourceNormal.y + up.z * sourceNormal.z
 
-                                if not bounds.mins then
-                                    bounds.mins = Vector(position.x, position.y, position.z)
-                                    bounds.maxs = Vector(position.x, position.y, position.z)
-                                else
-                                    bounds.mins.x = math.min(bounds.mins.x, position.x)
-                                    bounds.mins.y = math.min(bounds.mins.y, position.y)
-                                    bounds.mins.z = math.min(bounds.mins.z, position.z)
-                                    bounds.maxs.x = math.max(bounds.maxs.x, position.x)
-                                    bounds.maxs.y = math.max(bounds.maxs.y, position.y)
-                                    bounds.maxs.z = math.max(bounds.maxs.z, position.z)
-                                end
-
-                                local color = vertex.color or color_white
-                                mesh.Position(position)
-                                mesh.Normal(normal)
-                                mesh.TexCoord(0, vertex.u or 0, vertex.v or 0)
-                                mesh.Color(color.r or 255, color.g or 255, color.b or 255, color.a or 255)
-                                mesh.AdvanceVertex()
+                            if not bounds.mins then
+                                bounds.mins = Vector(position.x, position.y, position.z)
+                                bounds.maxs = Vector(position.x, position.y, position.z)
+                            else
+                                bounds.mins.x = math.min(bounds.mins.x, position.x)
+                                bounds.mins.y = math.min(bounds.mins.y, position.y)
+                                bounds.mins.z = math.min(bounds.mins.z, position.z)
+                                bounds.maxs.x = math.max(bounds.maxs.x, position.x)
+                                bounds.maxs.y = math.max(bounds.maxs.y, position.y)
+                                bounds.maxs.z = math.max(bounds.maxs.z, position.z)
                             end
+
+                            triangles[#triangles + 1] = {
+                                pos = Vector(position.x, position.y, position.z),
+                                normal = Vector(normal.x, normal.y, normal.z),
+                                u = vertex.u or 0,
+                                v = vertex.v or 0,
+                            }
                         end
                     end
                     if stats then transformTime = transformTime + profileClock() - transformStartedAt end
 
                     buildStartedAt = stats and profileClock()
-                    mesh.End()
-                    meshBegun = false
+                    drawing.mesh:BuildFromTriangles(triangles)
                     if stats then buildTime = buildTime + profileClock() - buildStartedAt end
                 end)
 
-                if meshBegun then pcall(mesh.End) end
                 if not ok then
                     if drawing and drawing.mesh and drawing.mesh.Destroy then drawing.mesh:Destroy() end
                     return fail(built)
