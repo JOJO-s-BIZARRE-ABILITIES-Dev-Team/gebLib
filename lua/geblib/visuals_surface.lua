@@ -32,6 +32,15 @@ local ANTLION_MODELS = {
 }
 
 Surface.RockModels = ROCK_MODELS
+Surface.AllModels = {}
+
+local modelSets = {ROCK_MODELS, METAL_MODELS, ANTLION_MODELS}
+for setIndex = 1, #modelSets do
+    local models = modelSets[setIndex]
+    for modelIndex = 1, #models do
+        Surface.AllModels[#Surface.AllModels + 1] = models[modelIndex]
+    end
+end
 
 function Surface.TouchesWater(position, normal)
     if not util or not util.PointContents or not bit or not bit.band or not CONTENTS_WATER then
@@ -46,12 +55,9 @@ function Surface.TouchesWater(position, normal)
     return bit.band(contents, CONTENTS_WATER) ~= 0
 end
 
-if util and util.PrecacheModel then
-    local sets = {ROCK_MODELS, METAL_MODELS, ANTLION_MODELS}
-    for setIndex = 1, #sets do
-        for modelIndex = 1, #sets[setIndex] do
-            util.PrecacheModel(sets[setIndex][modelIndex])
-        end
+if SERVER and util and util.PrecacheModel then
+    for modelIndex = 1, #Surface.AllModels do
+        util.PrecacheModel(Surface.AllModels[modelIndex])
     end
 end
 

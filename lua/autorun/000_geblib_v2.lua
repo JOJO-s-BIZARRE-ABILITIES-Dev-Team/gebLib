@@ -67,6 +67,8 @@ for _, path in ipairs(sharedFiles) do
     include(path)
 end
 
+if SERVER then include("geblib/visuals_surface.lua") end
+
 if CLIENT then
     for _, path in ipairs(clientFiles) do
         include(path)
