@@ -348,6 +348,11 @@ local impactDebris = gebLib.Visuals.CreateImpactDebris(trace.HitPos, trace.HitNo
     count = 1200,
     direction = shotDirection,
 })
+local crater = gebLib.Visuals.CreateSurfaceCrater(trace.HitPos, trace.HitNormal, 140, {
+    material = trace.MatType,
+    count = 12,
+    lifetime = 6,
+})
 local waterDebris = gebLib.Visuals.CreateWaterDebris(trace.HitPos, trace.HitNormal, 250, {
     particleCount = 400,
     direction = shotDirection + vector_up,
@@ -379,6 +384,8 @@ Debris is client-only and capped at 512 active entities by default. Creating ano
 Use `CreateDebrisBurst` for hundreds or thousands of cosmetic fragments. It creates one engine particle emitter instead of one entity per fragment and returns the number emitted. It accepts a material rather than a model. World collision is enabled by default; pass `collide = false` for the highest throughput. Optional settings are `lifetime`, `size`, `endSize`, `speed`, `spin`, `velocity`, `direction`, `spread`, `gravity`, `bounce`, `color`, `collide`, and `lighting`.
 
 `CreateImpactDebris` creates a complete surface-aware impact. By default it keeps geometry bounded to 16 static low-poly chunks and 12 physical chunks, then renders the remaining count as cheap non-colliding particles. Accepted static chunks from each impact are combined into static meshes by default. Physical rock chunks use volume-preserving convex box hulls, begin as client props, and retire their physics after two sleep confirmations. With static batching enabled, retired chunks then move into spatial static batches while keeping their original lifetime and fade. The retirement scan adapts to cover the tracked props every 0.5 seconds. `MAT_SLOSH`, or a point touching water when `material` is omitted, automatically uses water debris instead of rocks and smoke. Pass `modelCount`, `propCount`, and `particleCount` when an effect needs an exact visual composition. `preserveCount = true` lets that effect exceed the shared entity budget. Surface materials are sampled once and cached. Static batches share cached world-lighting samples and reproduce the native fast-fade curve with one batch-level blend. Smoke is capped at 96 sprites per impact; pass `smokeCount` to request a smaller amount. Other options include `material`, `direction`, `craters`, `props`, `particles`, `smoke`, `surface`, `modelScale`, `lifetime`, `propLifetime`, and `shadows`.
+
+`CreateSurfaceCrater` creates only the surface-bound static chunk layer of an impact. It keeps the crater centered on the supplied point, validates each chunk against the surface, samples the impacted texture, and uses the shared static batching and fade lifetime. `size` controls the default radius and chunk count. Override them with `radius` and `count`; other useful options are `material`, `hitTexture`, `modelScale`, `lifetime`, `shadows`, and `preserveCount`.
 
 `CreateWaterDebris` layers dense spray, droplets, low mist, `watersplash`, `gunshotsplash`, and surface-bound `waterripple` effects. Spray, droplets, and mist share one particle emitter per call. `particleCount` or `count` controls the particle budget. Optional settings include `direction`, `velocity`, `speed`, `spread`, `scale`, `radius`, `splashCount`, `rippleCount`, `color`, `mistColor`, and material overrides for each layer. Set `particles`, `effects`, `mist`, `gunshotSplashes`, or `ripples` to `false` to disable that layer.
 

@@ -1611,3 +1611,27 @@ function Visuals.CreateImpactDebris(position, normal, strength, options)
     if profiling then finishImpactProfile(impactStats, impactStartedAt, spawned) end
     return spawned, smokeEffect
 end
+
+function Visuals.CreateSurfaceCrater(position, normal, size, options)
+    options = Config.Copy(options)
+    size = math.max(tonumber(size) or 140, 1)
+
+    local count = math.Clamp(
+        math.floor(tonumber(options.count) or size / 12),
+        1,
+        MAX_IMPACT_MODELS
+    )
+    options.count = count
+    options.modelCount = count
+    options.propCount = 0
+    options.particleCount = 0
+    options.craters = true
+    options.props = false
+    options.particles = false
+    options.effects = false
+    options.smoke = false
+    options.radius = math.max(tonumber(options.radius) or size / 3, 1)
+    options.modelScale = math.max(tonumber(options.modelScale) or 0.65, 0.01)
+
+    return Visuals.CreateImpactDebris(position, normal, size, options)
+end
