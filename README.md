@@ -2,6 +2,16 @@
 
 gebLib is a small Garry's Mod Lua library for recurring combat, animation, camera, audio, visual, status-effect, and networking systems.
 
+## Documentation
+
+- [Getting started](docs/getting-started.md) explains loading, realms, naming, and cleanup.
+- [API reference](docs/api-reference.md) lists every supported public table, function, method, hook, and console control.
+- [Visuals and debris](docs/visuals.md) documents the complete visual option tables and lifecycle controls.
+- [Impact frames](docs/impact-frames.md) covers authored sequences, presets, masks, and fallback behavior.
+- [Examples](examples/README.md) contains a small addon-shaped integration plus focused recipes.
+
+Start with [the shared example](examples/lua/autorun/geblib_example_shared.lua), then add only the server or client examples needed by your addon. Files under `examples/` are inert until copied into an addon's `lua` directory.
+
 ## Loading and dependencies
 
 The stable bootstrap filename remains `lua/autorun/000_geblib_v2.lua` for upgrade compatibility. Its numeric prefix makes the shared bootstrap run early in Garry's Mod's alphabetically sorted autorun phase; this is not an addon-level priority system.
