@@ -389,9 +389,21 @@ local duration = gebLib.SoundDuration("sound/example.mp3")
 gebLib.SoundDurationAsync("sound/example.mp3", function(exactDuration)
     print(exactDuration)
 end)
+
+local durations = gebLib.PrecacheSoundDurations({
+    "sound/music/intro.mp3",
+    "sound/music/combat.mp3",
+})
+
+gebLib.PrecacheSoundDurationsAsync({
+    "sound/music/intro.mp3",
+    "sound/music/combat.mp3",
+}, function(asyncDurations)
+    print(asyncDurations["sound/music/combat.mp3"])
+end)
 ```
 
-Use `SoundDurationAsync` when resolving many uncached sounds. It deduplicates requests and caches exact results. Clients keep at most two non-playing audio channels in flight. Server and fallback MP3 parsing uses asynchronous file reads and limits Lua parsing to 0.5 milliseconds per tick. Cached callbacks run immediately.
+Use `PrecacheSoundDurations` to warm a known list synchronously during controlled loading. Use `PrecacheSoundDurationsAsync` when the batch must not block one game tick. Both provide results keyed by path and decode duplicate paths once. Clients keep at most two non-playing audio channels in flight. Server and fallback MP3 parsing uses asynchronous file reads and limits Lua parsing to 0.5 milliseconds per tick. Cached async callbacks run immediately.
 
 Debris is client-only and capped at 512 active entities by default. Creating another removes the debris that would expire next. Change `gebLib.Visuals.MaxDebris` before creating debris when a feature needs a different budget.
 
@@ -509,4 +521,4 @@ Run the optional local CPU benchmark with `lua tests/net_benchmark.lua` or `luaj
 
 Run `lua tests/visuals_benchmark.lua` or `luajit tests/visuals_benchmark.lua` to measure model-debris creation, idle overhead, Lua fade callbacks, native fade scheduling, expiry, and particle-burst setup. It does not measure engine rendering, particle simulation, or physics cost.
 
-Run `luajit tests/sound_benchmark.lua` to compare cold CBR MP3 scans, Xing-header MP3 reads, WAV chunk parsing, cached duration lookups, time-sliced bulk parsing, and client queue overhead through the public sound-duration APIs. It uses deterministic in-memory files, so it measures Lua decoder and queue cost without disk, game-filesystem, or audio-decoder variance.
+Run `luajit tests/sound_benchmark.lua` to compare cold CBR MP3 scans, synchronous and asynchronous batch precaching, Xing-header MP3 reads, WAV chunk parsing, cached duration lookups, time-sliced parsing, and client queue overhead through the public sound-duration APIs. It uses deterministic in-memory files, so it measures Lua decoder and queue cost without disk, game-filesystem, or audio-decoder variance.

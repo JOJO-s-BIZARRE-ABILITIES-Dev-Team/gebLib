@@ -665,3 +665,70 @@ function gebLib.SoundDurationAsync(soundPath, callback)
 	end
 	return true
 end
+
+local function UniqueSoundPaths(soundPaths)
+	if type(soundPaths) ~= "table" then return nil end
+
+	local pathCount = 0
+	for index in pairs(soundPaths) do
+		if type(index) ~= "number" or index < 1 or index % 1 ~= 0 then return nil end
+		pathCount = pathCount + 1
+	end
+
+	local uniquePaths = {}
+	local seenPaths = {}
+	for index = 1, pathCount do
+		local soundPath = soundPaths[index]
+		if type(soundPath) ~= "string" or soundPath == "" then return nil end
+		if not seenPaths[soundPath] then
+			seenPaths[soundPath] = true
+			uniquePaths[#uniquePaths + 1] = soundPath
+		end
+	end
+	return uniquePaths
+end
+
+--- Resolves and caches exact durations for a batch of sound files synchronously.
+--- Duplicate paths are decoded once. Use `PrecacheSoundDurationsAsync` for large
+--- uncached batches that must not block one game tick.
+---@param soundPaths string[] Paths relative to the `GAME` filesystem.
+---@return table<string, number>|nil durations Durations keyed by path, or nil when the list is invalid.
+function gebLib.PrecacheSoundDurations(soundPaths)
+	local uniquePaths = UniqueSoundPaths(soundPaths)
+	if not uniquePaths then return nil end
+
+	local durations = {}
+	for index = 1, #uniquePaths do
+		local soundPath = uniquePaths[index]
+		durations[soundPath] = gebLib.SoundDuration(soundPath)
+	end
+	return durations
+end
+
+--- Resolves and caches exact durations for a batch without synchronous bulk scanning.
+--- Duplicate paths share one lookup. The callback runs immediately when every path is
+--- already cached or the list is empty.
+---@param soundPaths string[] Paths relative to the `GAME` filesystem.
+---@param callback fun(durations: table<string, number>) Receives durations keyed by path.
+---@return boolean accepted Whether the complete list and callback were accepted.
+function gebLib.PrecacheSoundDurationsAsync(soundPaths, callback)
+	local uniquePaths = UniqueSoundPaths(soundPaths)
+	if not uniquePaths or type(callback) ~= "function" then return false end
+
+	local durations = {}
+	local remaining = #uniquePaths
+	if remaining == 0 then
+		callback(durations)
+		return true
+	end
+
+	for index = 1, #uniquePaths do
+		local soundPath = uniquePaths[index]
+		gebLib.SoundDurationAsync(soundPath, function(duration)
+			durations[soundPath] = duration
+			remaining = remaining - 1
+			if remaining == 0 then callback(durations) end
+		end)
+	end
+	return true
+end

@@ -180,6 +180,19 @@ local expectedMP3Duration = frameCount * frameSamples / sampleRate
 assert(math.abs(gebLib.SoundDuration("correctness-cbr.mp3") - expectedMP3Duration) < 0.000001)
 assert(math.abs(gebLib.SoundDuration("correctness-xing.mp3") - expectedMP3Duration) < 0.000001)
 assert(gebLib.SoundDuration("correctness.wav") == 1)
+assert(gebLib.PrecacheSoundDurations(nil) == nil)
+assert(gebLib.PrecacheSoundDurations({""}) == nil)
+assert(gebLib.PrecacheSoundDurations({[1] = "one.mp3", [3] = "three.mp3"}) == nil)
+assert(gebLib.PrecacheSoundDurations({path = "one.mp3"}) == nil)
+assert(next(gebLib.PrecacheSoundDurations({})) == nil)
+assert(not gebLib.PrecacheSoundDurationsAsync({"one.mp3"}, nil))
+local emptyAsyncResult
+assert(gebLib.PrecacheSoundDurationsAsync({}, function(durations) emptyAsyncResult = durations end))
+assert(emptyAsyncResult and next(emptyAsyncResult) == nil)
+local opensBeforeDuplicatePrecache = operations.open
+local duplicatePrecache = assert(gebLib.PrecacheSoundDurations({"sync-duplicate.mp3", "sync-duplicate.mp3"}))
+assert(math.abs(duplicatePrecache["sync-duplicate.mp3"] - expectedMP3Duration) < 0.000001)
+assert(operations.open == opensBeforeDuplicatePrecache + 1)
 
 local function operationSnapshot()
     local snapshot = {}
@@ -199,6 +212,12 @@ local function execute(iterations, callback, offset)
     local checksum = 0
     for index = 1, iterations do checksum = checksum + callback(index + offset) end
     return checksum
+end
+
+local function soundPaths(prefix, iterations)
+    local paths = {}
+    for index = 1, iterations do paths[index] = prefix .. index .. ".mp3" end
+    return paths
 end
 
 local function run(label, iterations, callback)
@@ -236,6 +255,24 @@ print(string.format(
 local synchronousCBRElapsed = run("cold CBR MP3", cbrIterations, function(index)
     return gebLib.SoundDuration("cold-cbr-" .. index .. ".mp3")
 end)
+assert(gebLib.PrecacheSoundDurations(soundPaths("warmup-batch-cbr-", math.min(cbrIterations, 100))))
+local synchronousBatchPaths = soundPaths("batch-cbr-", cbrIterations)
+collectgarbage("collect")
+local synchronousBatchOperations = operationSnapshot()
+local synchronousBatchStarted = os.clock()
+local synchronousBatchDurations = assert(gebLib.PrecacheSoundDurations(synchronousBatchPaths))
+local synchronousBatchElapsed = os.clock() - synchronousBatchStarted
+local synchronousBatchChecksum = 0
+for index = 1, #synchronousBatchPaths do
+    synchronousBatchChecksum = synchronousBatchChecksum + synchronousBatchDurations[synchronousBatchPaths[index]]
+end
+assert(math.abs(synchronousBatchChecksum - expectedMP3Duration * cbrIterations) < 0.0001)
+print(string.format(
+    "sync precache   %9.3f ms  %.2fx individual loop time",
+    synchronousBatchElapsed * 1000,
+    synchronousBatchElapsed / math.max(synchronousCBRElapsed, 0.000001)
+))
+print("  " .. operationDelta(synchronousBatchOperations))
 run("cold Xing MP3", fastIterations, function(index)
     return gebLib.SoundDuration("cold-xing-" .. index .. ".mp3")
 end)
@@ -248,16 +285,25 @@ end)
 
 assert(gebLib.SoundDuration(cachedPath) == cachedDuration)
 
-local function runAsyncCBR(label, iterations, prefix)
+local function runAsyncCBR(label, iterations, prefix, batch)
     local completed = 0
     local checksum = 0
+    local durations
+    local paths = batch and soundPaths(prefix, iterations)
     local before = operationSnapshot()
     local started = SysTime()
-    for index = 1, iterations do
-        assert(gebLib.SoundDurationAsync(prefix .. index .. ".mp3", function(duration)
-            completed = completed + 1
-            checksum = checksum + duration
+    if batch then
+        assert(gebLib.PrecacheSoundDurationsAsync(paths, function(results)
+            durations = results
+            completed = iterations
         end))
+    else
+        for index = 1, iterations do
+            assert(gebLib.SoundDurationAsync(prefix .. index .. ".mp3", function(duration)
+                completed = completed + 1
+                checksum = checksum + duration
+            end))
+        end
     end
     local submitted = SysTime()
     assert(completed == 0, "uncached server callbacks must not run during submission")
@@ -276,6 +322,9 @@ local function runAsyncCBR(label, iterations, prefix)
     end
 
     local elapsed = SysTime() - started
+    if batch then
+        for index = 1, #paths do checksum = checksum + durations[paths[index]] end
+    end
     assert(math.abs(checksum - expectedMP3Duration * iterations) < 0.0001)
     print(string.format(
         "%-16s %9.3f ms total  %7.3f ms submit  %7.3f ms max tick  %d ticks",
@@ -290,12 +339,19 @@ local function runAsyncCBR(label, iterations, prefix)
 end
 
 runAsyncCBR("async warmup", math.min(cbrIterations, 100), "warmup-async-cbr-")
+runAsyncCBR("precache warmup", math.min(cbrIterations, 100), "warmup-async-batch-cbr-", true)
 collectgarbage("collect")
 local asyncCBRElapsed, asyncMaximumTick = runAsyncCBR("async CBR MP3", cbrIterations, "async-cbr-")
+local asyncBatchElapsed, asyncBatchMaximumTick = runAsyncCBR("async precache", cbrIterations, "async-batch-cbr-", true)
 print(string.format(
     "async comparison: %.2fx lower maximum blocking slice; %.2fx total CPU cost",
     synchronousCBRElapsed / math.max(asyncMaximumTick, 0.000001),
     asyncCBRElapsed / math.max(synchronousCBRElapsed, 0.000001)
+))
+print(string.format(
+    "precache comparison: %.2fx sync batch time; %.3f ms maximum async batch slice",
+    asyncBatchElapsed / math.max(synchronousBatchElapsed, 0.000001),
+    asyncBatchMaximumTick * 1000
 ))
 
 local pendingChannels = {}
@@ -361,17 +417,6 @@ assert(maximumActiveChannels == math.min(cbrIterations, 2))
 assert(stoppedChannels == cbrIterations)
 assert(math.abs(clientChecksum - expectedMP3Duration * cbrIterations) < 0.0001)
 
-local duplicateCallbacks = 0
-assert(gebLib.SoundDurationAsync("client-duplicate.mp3", function() duplicateCallbacks = duplicateCallbacks + 1 end))
-assert(gebLib.SoundDurationAsync("client-duplicate.mp3", function() duplicateCallbacks = duplicateCallbacks + 1 end))
-local requestsBeforeDuplicateResolution = channelRequests
-resolveNextChannel()
-assert(duplicateCallbacks == 2)
-assert(channelRequests == requestsBeforeDuplicateResolution)
-assert(gebLib.SoundDurationAsync("client-duplicate.mp3", function() duplicateCallbacks = duplicateCallbacks + 1 end))
-assert(duplicateCallbacks == 3, "cached async duration should invoke its callback immediately")
-assert(channelRequests == requestsBeforeDuplicateResolution)
-
 print(string.format(
     "client queue Lua %9.3f ms total  %7.3f ms submit  %7.3f ms max callback  %d max active",
     clientElapsed * 1000,
@@ -379,3 +424,67 @@ print(string.format(
     maximumClientCallback * 1000,
     maximumActiveChannels
 ))
+
+local clientBatchWarmup
+assert(gebLib.PrecacheSoundDurationsAsync(
+    soundPaths("client-batch-warmup-cbr-", math.min(cbrIterations, 100)),
+    function(durations) clientBatchWarmup = durations end
+))
+while not clientBatchWarmup do resolveNextChannel() end
+collectgarbage("collect")
+
+local clientBatchPaths = soundPaths("client-batch-cbr-", cbrIterations)
+local clientBatchDurations
+local clientBatchRequestStart = channelRequests
+local clientBatchStarted = SysTime()
+assert(gebLib.PrecacheSoundDurationsAsync(clientBatchPaths, function(durations)
+    clientBatchDurations = durations
+end))
+local clientBatchSubmitted = SysTime()
+assert(channelRequests - clientBatchRequestStart == math.min(cbrIterations, 2))
+
+local maximumClientBatchCallback = 0
+while not clientBatchDurations do
+    local callbackStarted = SysTime()
+    resolveNextChannel()
+    maximumClientBatchCallback = math.max(maximumClientBatchCallback, SysTime() - callbackStarted)
+end
+local clientBatchElapsed = SysTime() - clientBatchStarted
+assert(channelRequests - clientBatchRequestStart == cbrIterations)
+for index = 1, #clientBatchPaths do
+    assert(clientBatchDurations[clientBatchPaths[index]] == expectedMP3Duration)
+end
+print(string.format(
+    "client precache %9.3f ms total  %7.3f ms submit  %7.3f ms max callback  %d max active",
+    clientBatchElapsed * 1000,
+    (clientBatchSubmitted - clientBatchStarted) * 1000,
+    maximumClientBatchCallback * 1000,
+    maximumActiveChannels
+))
+
+local singularDuplicateCallbacks = 0
+assert(gebLib.SoundDurationAsync("client-singular-duplicate.mp3", function()
+    singularDuplicateCallbacks = singularDuplicateCallbacks + 1
+end))
+assert(gebLib.SoundDurationAsync("client-singular-duplicate.mp3", function()
+    singularDuplicateCallbacks = singularDuplicateCallbacks + 1
+end))
+local requestsBeforeSingularDuplicate = channelRequests
+resolveNextChannel()
+assert(singularDuplicateCallbacks == 2)
+assert(channelRequests == requestsBeforeSingularDuplicate)
+
+local duplicateDurations
+local requestsBeforeDuplicate = channelRequests
+assert(gebLib.PrecacheSoundDurationsAsync({"client-duplicate.mp3", "client-duplicate.mp3"}, function(durations)
+    duplicateDurations = durations
+end))
+assert(channelRequests == requestsBeforeDuplicate + 1)
+resolveNextChannel()
+assert(duplicateDurations["client-duplicate.mp3"] == expectedMP3Duration)
+local cachedBatchCalled = false
+assert(gebLib.PrecacheSoundDurationsAsync({"client-duplicate.mp3"}, function()
+    cachedBatchCalled = true
+end))
+assert(cachedBatchCalled, "cached precache should invoke its callback immediately")
+assert(channelRequests == requestsBeforeDuplicate + 1)
