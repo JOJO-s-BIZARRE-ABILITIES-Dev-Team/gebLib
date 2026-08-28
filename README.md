@@ -385,7 +385,13 @@ gebLib.Drawing.CircularBar(x, y, progress, radius, thickness, angle, color)
 gebLib.Drawing.TextWithShadow(text, font, x, y, color)
 
 local duration = gebLib.SoundDuration("sound/example.mp3")
+
+gebLib.SoundDurationAsync("sound/example.mp3", function(exactDuration)
+    print(exactDuration)
+end)
 ```
+
+Use `SoundDurationAsync` when resolving many uncached sounds. It deduplicates requests and caches exact results. Clients keep at most two non-playing audio channels in flight. Server and fallback MP3 parsing uses asynchronous file reads and limits Lua parsing to 0.5 milliseconds per tick. Cached callbacks run immediately.
 
 Debris is client-only and capped at 512 active entities by default. Creating another removes the debris that would expire next. Change `gebLib.Visuals.MaxDebris` before creating debris when a feature needs a different budget.
 
@@ -502,3 +508,5 @@ All shipped Lua files use Lua 5.1-compatible syntax. They are checked with LuaJI
 Run the optional local CPU benchmark with `lua tests/net_benchmark.lua` or `luajit tests/net_benchmark.lua`. It compares schema sends against equivalent direct `net` calls in a Lua mock. It is useful for tracking wrapper overhead, but only an in-game benchmark can measure Source networking and real addon traffic.
 
 Run `lua tests/visuals_benchmark.lua` or `luajit tests/visuals_benchmark.lua` to measure model-debris creation, idle overhead, Lua fade callbacks, native fade scheduling, expiry, and particle-burst setup. It does not measure engine rendering, particle simulation, or physics cost.
+
+Run `luajit tests/sound_benchmark.lua` to compare cold CBR MP3 scans, Xing-header MP3 reads, WAV chunk parsing, cached duration lookups, time-sliced bulk parsing, and client queue overhead through the public sound-duration APIs. It uses deterministic in-memory files, so it measures Lua decoder and queue cost without disk, game-filesystem, or audio-decoder variance.

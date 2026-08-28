@@ -18,6 +18,7 @@ This reference covers the supported public surface of gebLib 3.3.0. Names beginn
 | `gebLib.DebugMode()` | Shared | Boolean | Reads `geblib_developer_debugmode`. |
 | `gebLib.PrintDebug(...)` | Shared | Nothing | Prints with a `[gebLib]` prefix only while debug mode is enabled. |
 | `gebLib.SoundDuration(path)` | Shared | Seconds | Reads and caches MP3 or WAV duration, falling back to `SoundDuration`. `path` is relative to the game filesystem. |
+| `gebLib.SoundDurationAsync(path, callback)` | Shared | Boolean | Queues an exact duration lookup and calls `callback(duration)`. Cached callbacks run immediately. Client decoding has two channels in flight; server and fallback parsing is limited to 0.5 milliseconds per tick. |
 
 ### Hooks and console controls
 
